@@ -120,7 +120,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       } catch {
         return;
       }
-
+      if (msg.type === "order_triggered") {
+        usePortfolioStore.getState().handleWsMessage(msg);
+      }
       if (msg.type === "snapshot") {
         // Ganti seluruh quotes sekaligus
         set({ quotes: msg.data });
