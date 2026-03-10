@@ -9,7 +9,7 @@
 //   Reconnect otomatis dengan exponential backoff (max 30 detik).
 
 import { create } from "zustand";
-
+import { usePortfolioStore } from "./usePortfolioStore";
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface QuoteData {
