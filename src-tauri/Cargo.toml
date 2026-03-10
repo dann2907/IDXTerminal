@@ -1,0 +1,32 @@
+[package]
+name = "idx-terminal"
+version = "0.1.0"
+description = "IDX Terminal — Bloomberg-style trading dashboard"
+authors = ["Ryou"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "idx_terminal_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "idx-terminal"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri         = { version = "2.0", features = [] }
+serde         = { version = "1.0", features = ["derive"] }
+serde_json    = "1.0"
+# tauri-plugin-shell ditambahkan kembali nanti saat Python sidecar sudah siap
+
+[profile.release]
+panic        = "abort"
+codegen-units = 1
+lto          = true
+opt-level    = "s"
+strip        = true
