@@ -22,13 +22,15 @@
 #   DELETE /api/portfolio/watchlist/{ticker}
 
 import logging
-from typing import Annotated, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 
 from db.database import AsyncSessionLocal
+from models.portfolio import Holding
 from services.portfolio_service import PortfolioService
 
 logger = logging.getLogger(__name__)
@@ -301,19 +303,13 @@ async def _sync_registry_after_trade() -> None:
     """
     Setelah buy/sell/confirm, sync holdings terbaru ke TickerRegistry
     agar DataFetcher selalu track ticker yang dipegang.
-    Juga panggil TickerRegistry.promote() untuk ticker yang baru dibeli
-    jika sebelumnya ada di search_temp.
     """
-    from routers.market import _registry  # noqa: PLC0415 — hindari circular import top-level
+    from routers.market import _registry  # noqa: PLC0415 — lazy import hindari circular ref
     if _registry is None:
         return
     async with AsyncSessionLocal() as db:
-        holdings_result = await db.execute(
-            __import__("sqlalchemy", fromlist=["select"]).select(
-                __import__("models.portfolio", fromlist=["Holding"]).Holding
-            )
-        )
-        tickers = [h.ticker for h in holdings_result.scalars().all()]
+        result = await db.execute(select(Holding))
+        tickers = [h.ticker for h in result.scalars().all()]
     await _registry.sync_holdings(tickers)
 
 

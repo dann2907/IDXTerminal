@@ -10,6 +10,7 @@
 
 import { create } from "zustand";
 import { usePortfolioStore } from "./usePortfolioStore";
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface QuoteData {
@@ -114,22 +115,25 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     };
 
     _ws.onmessage = (event) => {
-      let msg: { type: string; data: Record<string, QuoteData> };
+      // Tipe union: snapshot/update punya data Record<string, QuoteData>,
+      // order_triggered punya data object berbeda — pakai unknown lalu narrow.
+      let msg: { type: string; data: unknown };
       try {
         msg = JSON.parse(event.data as string);
       } catch {
         return;
       }
+
+      // Routing berdasarkan type
       if (msg.type === "order_triggered") {
         usePortfolioStore.getState().handleWsMessage(msg);
+        return; // tidak update quotes
       }
       if (msg.type === "snapshot") {
-        // Ganti seluruh quotes sekaligus
-        set({ quotes: msg.data });
+        set({ quotes: msg.data as Record<string, QuoteData> });
       } else if (msg.type === "update") {
-        // Merge update parsial
         set(state => ({
-          quotes: { ...state.quotes, ...msg.data },
+          quotes: { ...state.quotes, ...(msg.data as Record<string, QuoteData>) },
         }));
       }
     };

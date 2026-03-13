@@ -6,6 +6,7 @@
 #   GET  /api/market/candles/{ticker}    → OHLCV historis dari yfinance
 #   GET  /api/market/search/{query}      → cari + daftarkan sebagai search_temp
 #   GET  /api/market/status              → jam bursa + registry snapshot
+#   GET  /api/market/index               → IHSG + LQ45 live dari yfinance
 #   WS   /ws/prices                      → stream harga real-time
 
 import asyncio
@@ -181,6 +182,44 @@ async def get_candles(
     return JSONResponse({"ticker": t, "period": period, "interval": interval, "candles": candles})
 
 
+@router.get("/api/market/ihsg")
+async def get_ihsg() -> JSONResponse:
+    """
+    Kembalikan data IHSG (^JKSE) dari yfinance.
+    Cache 60 detik di sisi server — topbar boleh polling tanpa throttle sendiri.
+
+    Response:
+      { "price": 7284.5, "change": 31.2, "change_pct": 0.43 }
+    Kembalikan {} jika yfinance gagal (topbar tampilkan "—").
+    """
+    import time  # noqa: PLC0415
+    now = time.monotonic()
+
+    if _ihsg_cache["data"] is not None and now - _ihsg_cache["ts"] < 60:
+        return JSONResponse(_ihsg_cache["data"])
+
+    loop = asyncio.get_event_loop()
+    try:
+        data = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_ihsg),
+            timeout=10,
+        )
+    except asyncio.TimeoutError:
+        if _ihsg_cache["data"] is not None:
+            return JSONResponse(_ihsg_cache["data"])
+        raise HTTPException(status_code=504, detail="yfinance timeout fetching IHSG")
+
+    if data:
+        _ihsg_cache["data"] = data
+        _ihsg_cache["ts"] = now
+
+    return JSONResponse(data or {})
+
+
+# Cache modul-level untuk IHSG — reset saat server restart
+_ihsg_cache: dict = {"data": None, "ts": 0.0}
+
+
 # ── Blocking helpers (untuk run_in_executor) ──────────────────────────────────
 
 def _fetch_ticker_info(ticker_jk: str) -> dict | None:
@@ -207,7 +246,6 @@ def _fetch_candles(ticker_jk: str, period: str, interval: str) -> list[dict] | N
 
         result = []
         for ts, row in hist.iterrows():
-       
             result.append({
                 "time": int(ts.timestamp()),            # unix timestamp
                 "open": round(float(row["Open"]), 2),
@@ -220,3 +258,25 @@ def _fetch_candles(ticker_jk: str, period: str, interval: str) -> list[dict] | N
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("yfinance candles error %s: %s", ticker_jk, exc)
         return None
+
+
+def _fetch_ihsg() -> dict:
+    """
+    Fetch IHSG (^JKSE) dari yfinance. Dijalankan di thread pool — blocking call.
+    Kembalikan dict kosong jika gagal; caller akan pakai cache lama.
+    """
+    try:
+        tk = yf.Ticker("^JKSE")
+        hist = tk.history(period="2d", interval="1d")
+        if hist.empty:
+            return {}
+        last = hist.iloc[-1]
+        prev = hist.iloc[-2] if len(hist) >= 2 else hist.iloc[-1]
+        price = round(float(last["Close"]), 2)
+        prev_close = round(float(prev["Close"]), 2)
+        change = round(price - prev_close, 2)
+        change_pct = round((change / prev_close * 100) if prev_close else 0.0, 2)
+        return {"price": price, "change": change, "change_pct": change_pct}
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.debug("IHSG fetch error: %s", exc)
+        return {}
