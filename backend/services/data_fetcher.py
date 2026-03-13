@@ -139,10 +139,6 @@ class DataFetcher:
     def __init__(self) -> None:
         self._session: aiohttp.ClientSession | None = None
         self._task: asyncio.Task | None = None
-        self._fail_counts: dict[str, int] = {}
-        self._skip_until: dict[str, datetime] = {}
-        _FAIL_THRESHOLD = 3
-        _SKIP_MINUTES = 10
 
     async def start(
         self,
@@ -306,76 +302,31 @@ def _parse_idx_response(ticker_jk: str, raw: dict) -> QuoteData | None:
 
 def _blocking_yfinance(ticker_jk: str) -> QuoteData | None:
     """
-    Robust blocking yfinance call with retries, backoff and fallback.
-    Must run in executor (as before).
+    Blocking yfinance call — harus dijalankan di executor.
+
+    Beberapa saham IDX gagal di period="2d" (delisted warning palsu,
+    atau empty JSON dari server). Strategy:
+      1. Coba period="5d" — lebih stabil, dapat prev_close dari hari sebelumnya
+      2. Fallback period="1mo" — hampir selalu berhasil, ambil baris terakhir
+      3. Jika masih gagal → return None (DataFetcher akan skip ticker)
     """
     tk = yf.Ticker(ticker_jk)
-    periods = ("5d", "1mo", "max")
-    max_attempts = 3
-    base_backoff = 0.8  # seconds
 
-    for attempt in range(1, max_attempts + 1):
-        for period in periods:
-            try:
-                hist = tk.history(period=period, auto_adjust=True, actions=False)
-                # sometimes yfinance returns empty DataFrame
-                if hist is None or getattr(hist, "empty", True):
-                    logger.debug("yfinance empty (%s) for %s (attempt=%d)", period, ticker_jk, attempt)
-                    continue
+    for period in ("5d", "1mo"):
+        try:
+            hist = tk.history(period=period, auto_adjust=True, actions=False)
+            if hist.empty:
+                continue
 
-                # take last row
-                if len(hist) == 0:
-                    continue
-
-                row = hist.iloc[-1]
-                price = float(row["Close"])
-                if price <= 0:
-                    logger.debug("yfinance non-positive price for %s: %s", ticker_jk, price)
-                    continue
-
-                prev_close = float(hist.iloc[-2]["Close"]) if len(hist) >= 2 else price
-                open_   = float(row.get("Open", price))
-                high    = float(row.get("High", price))
-                low     = float(row.get("Low", price))
-                volume  = int(row.get("Volume", 0))
-
-                return QuoteData(
-                    ticker=ticker_jk,
-                    price=price,
-                    prev_close=prev_close,
-                    open_=open_,
-                    high=high,
-                    low=low,
-                    volume=volume,
-                    is_live=False,
-                )
-
-            except Exception as exc:  # pylint: disable=broad-except
-                # Common error "Expecting value: line 1 column 1 (char 0)" indicates
-                # empty/non-json response from Yahoo. We'll retry with backoff.
-                logger.debug(
-                    "yfinance %s (period=%s) attempt=%d error: %s | tb=%s",
-                    ticker_jk, period, attempt, repr(exc),
-                    traceback.format_exc(limit=1)
-                )
-                # continue to next period or retry attempt
-
-        # end periods loop -> if we reach here, no period succeeded
-        backoff = base_backoff * (2 ** (attempt - 1))
-        logger.debug("yfinance all periods failed for %s, sleeping %.2fs before retry (attempt=%d/%d)",
-                     ticker_jk, backoff, attempt, max_attempts)
-        time.sleep(backoff)
-
-    # final fallback: try yf.download once (different codepath)
-    try:
-        df = yf.download(tickers=ticker_jk, period="1mo", progress=False, threads=False, auto_adjust=True)
-        if df is not None and getattr(df, "empty", True) is False:
-            row = df.iloc[-1]
+            row = hist.iloc[-1]
             price = float(row["Close"])
-            prev_close = float(df.iloc[-2]["Close"]) if len(df) >= 2 else price
-            open_   = float(row.get("Open", price))
-            high    = float(row.get("High", price))
-            low     = float(row.get("Low", price))
+            if price <= 0:
+                continue
+
+            prev_close = float(hist.iloc[-2]["Close"]) if len(hist) >= 2 else price
+            open_   = float(row.get("Open",   price))
+            high    = float(row.get("High",   price))
+            low     = float(row.get("Low",    price))
             volume  = int(row.get("Volume", 0))
 
             return QuoteData(
@@ -388,8 +339,9 @@ def _blocking_yfinance(ticker_jk: str) -> QuoteData | None:
                 volume=volume,
                 is_live=False,
             )
-    except Exception as exc:
-        logger.debug("yfinance.download fallback failed for %s: %s", ticker_jk, repr(exc))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("yfinance %s (period=%s) error: %s", ticker_jk, period, exc)
+            continue
 
     logger.warning("yfinance: semua period gagal untuk %s", ticker_jk)
     return None
