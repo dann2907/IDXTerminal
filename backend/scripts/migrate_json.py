@@ -217,7 +217,10 @@ async def migrate(data: dict, force: bool = False) -> None:
             )
             h = result.scalar_one_or_none()
             if h:
-                h.first_buy = dt
+                # setattr dipakai untuk menghindari Pylance false-positive:
+                # Pylance tidak tahu bahwa SQLAlchemy Column[datetime] menerima
+                # datetime biasa saat runtime — ini valid dan aman.
+                setattr(h, "first_buy", dt)
 
         hist_count = 0
         for trade in history_raw:

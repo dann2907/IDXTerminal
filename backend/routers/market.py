@@ -236,22 +236,28 @@ def _fetch_ticker_info(ticker_jk: str) -> dict | None:
         return None
 
 
+import pandas as pd  # noqa: PLC0415 — hanya dipakai di helper ini
+
+
 def _fetch_candles(ticker_jk: str, period: str, interval: str) -> list[dict] | None:
     """Ambil OHLCV historis dari yfinance dan konversi ke list of dict."""
     try:
         tk = yf.Ticker(ticker_jk)
-        hist = tk.history(period=period, interval=interval)
+        hist = tk.history(period=period, interval=interval, auto_adjust=True, actions=False)
         if hist.empty:
             return None
 
         result = []
         for ts, row in hist.iterrows():
+            # iterrows() mengembalikan index sebagai Hashable;
+            # cast eksplisit ke pd.Timestamp agar Pylance tahu .timestamp() ada.
+            unix_ts = int(pd.Timestamp(ts).timestamp())
             result.append({
-                "time": int(ts.timestamp()),            # unix timestamp
-                "open": round(float(row["Open"]), 2),
-                "high": round(float(row["High"]), 2),
-                "low": round(float(row["Low"]), 2),
-                "close": round(float(row["Close"]), 2),
+                "time":   unix_ts,
+                "open":   round(float(row["Open"]),  2),
+                "high":   round(float(row["High"]),  2),
+                "low":    round(float(row["Low"]),   2),
+                "close":  round(float(row["Close"]), 2),
                 "volume": int(row.get("Volume", 0)),
             })
         return result

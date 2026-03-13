@@ -301,36 +301,45 @@ def _parse_idx_response(ticker_jk: str, raw: dict) -> QuoteData | None:
 def _blocking_yfinance(ticker_jk: str) -> QuoteData | None:
     """
     Blocking yfinance call — harus dijalankan di executor.
-    Ambil data 2 hari terakhir; ambil baris paling terakhir.
+
+    Beberapa saham IDX gagal di period="2d" (delisted warning palsu,
+    atau empty JSON dari server). Strategy:
+      1. Coba period="5d" — lebih stabil, dapat prev_close dari hari sebelumnya
+      2. Fallback period="1mo" — hampir selalu berhasil, ambil baris terakhir
+      3. Jika masih gagal → return None (DataFetcher akan skip ticker)
     """
-    try:
-        tk = yf.Ticker(ticker_jk)
-        hist = tk.history(period="2d", timeout=_YFINANCE_TIMEOUT)
-        if hist.empty:
-            return None
+    tk = yf.Ticker(ticker_jk)
 
-        row = hist.iloc[-1]
-        price = float(row["Close"])
-        if price <= 0:
-            return None
+    for period in ("5d", "1mo"):
+        try:
+            hist = tk.history(period=period, auto_adjust=True, actions=False)
+            if hist.empty:
+                continue
 
-        # prev_close = baris sebelumnya jika ada, else open
-        prev_close = float(hist.iloc[-2]["Close"]) if len(hist) >= 2 else float(row["Open"])
-        open_ = float(row["Open"])
-        high = float(row["High"])
-        low = float(row["Low"])
-        volume = int(row.get("Volume", 0))
+            row = hist.iloc[-1]
+            price = float(row["Close"])
+            if price <= 0:
+                continue
 
-        return QuoteData(
-            ticker=ticker_jk,
-            price=price,
-            prev_close=prev_close,
-            open_=open_,
-            high=high,
-            low=low,
-            volume=volume,
-            is_live=False,
-        )
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("yfinance blocking error %s: %s", ticker_jk, exc)
-        return None
+            prev_close = float(hist.iloc[-2]["Close"]) if len(hist) >= 2 else price
+            open_   = float(row.get("Open",   price))
+            high    = float(row.get("High",   price))
+            low     = float(row.get("Low",    price))
+            volume  = int(row.get("Volume", 0))
+
+            return QuoteData(
+                ticker=ticker_jk,
+                price=price,
+                prev_close=prev_close,
+                open_=open_,
+                high=high,
+                low=low,
+                volume=volume,
+                is_live=False,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("yfinance %s (period=%s) error: %s", ticker_jk, period, exc)
+            continue
+
+    logger.warning("yfinance: semua period gagal untuk %s", ticker_jk)
+    return None

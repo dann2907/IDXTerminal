@@ -60,12 +60,12 @@ async def _load_tickers_from_db() -> tuple[list[str], list[str]]:
         await PortfolioService.ensure_meta(db)
 
         h_result = await db.execute(select(Holding))
-        holdings = [h.ticker for h in h_result.scalars().all()]
+        holdings = [str(h.ticker) for h in h_result.scalars().all()]
 
         w_result = await db.execute(
             select(Watchlist).order_by(Watchlist.display_order)
         )
-        watchlist = [w.ticker for w in w_result.scalars().all()]
+        watchlist = [str(w.ticker) for w in w_result.scalars().all()]
 
     logger.info(
         "Loaded from SQLite — holdings: %d, watchlist: %d",
