@@ -3,9 +3,13 @@
 # Async price fetcher — tidak ada dependency PyQt6.
 #
 # Sumber data:
-#   Market buka  → IDX internal API (idx.co.id) delay ~1-3 menit
-#                   fallback ke yfinance jika IDX gagal untuk ticker tsb
-#   Market tutup → yfinance last close langsung (hemat quota IDX)
+#   Market buka  → IDX GetSecuritiesStock snapshot (700+ saham, 1 request)
+#                   → filter ke ticker user → yfinance fallback untuk miss
+#   Market tutup → yfinance last close langsung
+#
+# Arsitektur snapshot (Fase 4):
+#   IDX API (1 req) → parse ~700 baris → filter ticker user → broadcast
+#   Jauh lebih cepat + tidak kena rate-limit vs fetch per-ticker.
 #
 # Format ticker internal app : "BBCA.JK"
 # IDX API pakai              : "BBCA"  (tanpa .JK)
@@ -19,8 +23,6 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
-import time
-import traceback
 
 import aiohttp
 import yfinance as yf
@@ -53,6 +55,9 @@ _IDX_SESSIONS: dict[int, list[tuple[int, int, int, int]]] = {
 _IDX_SUMMARY_URL = (
     "https://www.idx.co.id/umbraco/Surface/StockData/GetStockSummary"
 )
+_IDX_SNAPSHOT_URL = (
+    "https://www.idx.co.id/umbraco/Surface/StockData/GetSecuritiesStock"
+)
 _IDX_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -62,10 +67,10 @@ _IDX_HEADERS = {
     "Referer": "https://www.idx.co.id/",
     "Accept": "application/json, text/javascript, */*; q=0.01",
 }
-_IDX_TIMEOUT = aiohttp.ClientTimeout(total=8)
-_IDX_BATCH_DELAY = 0.35   # detik antar ticker agar tidak rate-limited
-_POLL_INTERVAL = 15        # detik antar full poll cycle
-_YFINANCE_TIMEOUT = 10     # detik untuk yfinance request
+_IDX_TIMEOUT    = aiohttp.ClientTimeout(total=15)  # snapshot lebih besar, naikkan timeout
+_IDX_BATCH_DELAY = 0.35   # detik antar ticker, masih dipakai oleh fallback per-ticker
+_POLL_INTERVAL   = 15     # detik antar full poll cycle
+_YFINANCE_TIMEOUT = 10    # detik untuk yfinance request
 
 
 # ── QuoteData ─────────────────────────────────────────────────────────────────
@@ -194,31 +199,136 @@ class DataFetcher:
     async def _fetch_all(
         self, tickers: set[str]
     ) -> dict[str, QuoteData]:
-        live = is_market_open()
+        """
+        Strategi baru (Fase 4):
+
+        Market BUKA:
+          1. Ambil snapshot seluruh IDX dalam SATU request (~700 saham)
+          2. Filter ke tickers yang dibutuhkan user
+          3. Ticker yang tidak ada di snapshot → fallback yfinance (saham baru, dll)
+
+        Market TUTUP:
+          Langsung yfinance last-close (IDX API kembalikan data stale).
+
+        Manfaat snapshot:
+          - 1 request vs N request (N = jumlah ticker user)
+          - Tidak kena rate-limit IDX
+          - Latency jauh lebih stabil
+        """
+        if not is_market_open():
+            return await self._fetch_all_yfinance(tickers)
+
+        # ── Market buka: snapshot IDX ──────────────────────────────────────
+        snapshot = await self._fetch_idx_snapshot()
+
         results: dict[str, QuoteData] = {}
+        missing: list[str] = []
 
-        for ticker in sorted(tickers):  # sorted agar log deterministik
-            quote: QuoteData | None = None
-
-            if live:
-                quote = await self._fetch_idx(ticker)
-                if quote is None:
-                    quote = await self._fetch_yfinance(ticker)
-                    if quote:
-                        logger.debug("IDX miss, yfinance fallback: %s", ticker)
-                # Delay antar ticker saat market buka agar tidak rate-limited
-                await asyncio.sleep(_IDX_BATCH_DELAY)
+        for ticker in tickers:
+            if ticker in snapshot:
+                results[ticker] = snapshot[ticker]
             else:
-                quote = await self._fetch_yfinance(ticker)
+                missing.append(ticker)
 
+        logger.info(
+            "IDX snapshot: %d/%d hit, %d fallback ke yfinance",
+            len(results), len(tickers), len(missing),
+        )
+
+        # Fallback yfinance untuk ticker yang tidak ada di snapshot IDX
+        # (saham baru listing, warrant, ETF non-IDX, dll)
+        for ticker in missing:
+            quote = await self._fetch_yfinance(ticker)
             if quote:
                 results[ticker] = quote
             else:
-                logger.warning("No data for %s (live=%s)", ticker, live)
+                logger.warning("No data for %s (IDX miss + yfinance fail)", ticker)
 
         return results
 
-    # ── IDX API fetch ─────────────────────────────────────────────────────────
+    async def _fetch_all_yfinance(
+        self, tickers: set[str]
+    ) -> dict[str, QuoteData]:
+        """Fetch semua ticker via yfinance — dipakai saat market tutup."""
+        results: dict[str, QuoteData] = {}
+        for ticker in tickers:
+            quote = await self._fetch_yfinance(ticker)
+            if quote:
+                results[ticker] = quote
+            else:
+                logger.warning("No data for %s (market closed, yfinance fail)", ticker)
+        return results
+
+    # ── IDX Snapshot (seluruh pasar, 1 request) ───────────────────────────────
+
+    async def _fetch_idx_snapshot(self) -> dict[str, QuoteData]:
+        """
+        Ambil seluruh saham IDX dalam SATU request.
+        Endpoint GetSecuritiesStock mengembalikan 700+ saham sekaligus.
+
+        Return dict ticker → QuoteData.
+        Return {} jika request gagal — caller akan fallback ke yfinance.
+        """
+        assert self._session is not None
+        try:
+            async with self._session.get(_IDX_SNAPSHOT_URL) as resp:
+                if resp.status != 200:
+                    logger.warning("IDX snapshot HTTP %d", resp.status)
+                    return {}
+                raw = await resp.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error("IDX snapshot request failed: %s", exc)
+            return {}
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("IDX snapshot unexpected error: %s", exc)
+            return {}
+
+        rows = raw if isinstance(raw, list) else raw.get("data", raw.get("Data", []))
+        results: dict[str, QuoteData] = {}
+        skipped = 0
+
+        for row in rows:
+            try:
+                code = (
+                    row.get("Code") or row.get("StockCode") or row.get("code") or ""
+                ).strip()
+                if not code:
+                    skipped += 1
+                    continue
+
+                ticker = f"{code}.JK"
+                price = float(row.get("LastPrice") or row.get("lastPrice") or 0)
+                if price <= 0:
+                    skipped += 1
+                    continue
+
+                prev_close = float(row.get("PreviousPrice") or row.get("previousPrice") or price)
+                open_  = float(row.get("OpenPrice")  or row.get("openPrice")  or price)
+                high   = float(row.get("HighPrice")  or row.get("highPrice")  or price)
+                low    = float(row.get("LowPrice")   or row.get("lowPrice")   or price)
+                volume = int(float(row.get("Volume") or row.get("volume") or 0))
+
+                results[ticker] = QuoteData(
+                    ticker=ticker,
+                    price=price,
+                    prev_close=prev_close,
+                    open_=open_,
+                    high=high,
+                    low=low,
+                    volume=volume,
+                    is_live=True,
+                )
+            except Exception:  # pylint: disable=broad-except
+                skipped += 1
+                continue
+
+        logger.info(
+            "IDX snapshot parsed: %d saham, %d dilewati",
+            len(results), skipped,
+        )
+        return results
+
+    # ── IDX per-ticker fallback (masih dipakai jika snapshot gagal total) ──────
 
     async def _fetch_idx(self, ticker_jk: str) -> QuoteData | None:
         """
