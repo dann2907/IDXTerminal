@@ -4,7 +4,7 @@
 // Fitur baru: Search saham, Orders TP/SL panel, Trade history, Performance.
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import LWChart from "./LWChart";
+import CandleChart from "./chart/CandleChart";
 import SearchBar from "./SearchBar";
 import OrdersPanel from "./portfolio/OrdersPanel";
 import TradeHistory from "./portfolio/TradeHistory";
@@ -290,7 +290,6 @@ export default function IDXTerminal() {
   const wsStatus    = useMarketStore(s => s.wsStatus);
   const topGainers  = useMarketStore(s => s.topGainers);
   const topLosers   = useMarketStore(s => s.topLosers);
-  const fetchCandles = useMarketStore(s => s.fetchCandles);
 
   const summary   = usePortfolioStore(s => s.summary);
   const holdings  = usePortfolioStore(s => s.holdings);
@@ -308,7 +307,6 @@ export default function IDXTerminal() {
   const [tradeAction, setTradeAction] = useState("BUY");
   const [tradeLots, setTradeLots] = useState("");
   const [tradeMsg, setTradeMsg]   = useState(null);
-  const [chartLoading, setChartLoading] = useState(false);
   const [portfolioTab, setPortfolioTab] = useState("holdings"); // holdings|orders|history|performance
 
   // Handler dari SearchBar
@@ -354,11 +352,6 @@ export default function IDXTerminal() {
   }, []);
 
   // ── Fetch candles saat ticker atau period berubah ─────────────────────
-  useEffect(() => {
-    const { period: p, interval: iv } = PERIOD_MAP[period];
-    setChartLoading(true);
-    fetchCandles(selectedTicker, p, iv).finally(() => setChartLoading(false));
-  }, [selectedTicker, period, fetchCandles]);
 
   // ── Set default selected ticker dari watchlist ────────────────────────
   useEffect(() => {
@@ -401,8 +394,9 @@ export default function IDXTerminal() {
     setTimeout(() => setTradeMsg(null), 4000);
   }, [tradeLots, tradeAction, selectedTicker, quotes, buy, sell]);
 
-  // ── Indicators dari candle data ───────────────────────────────────────
   const indicators = calcIndicators(selectedCandles);
+
+  // ── Indicators dari candle data ───────────────────────────────────────
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
@@ -498,10 +492,11 @@ export default function IDXTerminal() {
 
                 <div className="chart-box">
                   <div className="chart-inner">
-                    <LWChart
-                      candles={selectedCandles}
-                      height={260}
-                      loading={chartLoading}
+                    <CandleChart
+                      ticker={selectedTicker}
+                      period={PERIOD_MAP[period].period}
+                      interval="1d"
+                      height={340}
                     />
                   </div>
                   <div className="indicator-row">

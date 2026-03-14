@@ -7,9 +7,13 @@
 //   → "snapshot" message  : replace semua harga sekaligus
 //   → "update"   message  : merge harga baru ke state
 //   Reconnect otomatis dengan exponential backoff (max 30 detik).
+//
+// fetchOrders setelah reconnect ditangani eksklusif oleh App.tsx
+// via useEffect([wsStatus]) — tidak perlu duplikat di sini.
 
 import { create } from "zustand";
 import { usePortfolioStore } from "./usePortfolioStore";
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface QuoteData {
@@ -40,21 +44,14 @@ type WsStatus = "connecting" | "connected" | "disconnected" | "error";
 // ── Store state & actions ──────────────────────────────────────────────────
 
 interface MarketState {
-  // Harga: ticker → QuoteData
   quotes: Record<string, QuoteData>;
-
-  // Candle cache: ticker → CandleData[]
   candles: Record<string, CandleData[]>;
-
-  // Status koneksi WS
   wsStatus: WsStatus;
 
-  // Computed helpers
   getQuote: (ticker: string) => QuoteData | undefined;
   topGainers: (n?: number) => QuoteData[];
   topLosers:  (n?: number) => QuoteData[];
 
-  // Actions
   initWebSocket: () => void;
   disconnectWebSocket: () => void;
   fetchCandles: (ticker: string, period?: string, interval?: string) => Promise<void>;
@@ -65,7 +62,7 @@ interface MarketState {
 
 let _ws: WebSocket | null = null;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let _reconnectDelay = 1000;   // ms, naik exponential sampai MAX
+let _reconnectDelay = 1000;
 const _MAX_RECONNECT = 30_000;
 
 const WS_URL = "ws://127.0.0.1:8765/ws/prices";
@@ -101,28 +98,21 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   // ── WebSocket ─────────────────────────────────────────────────────────────
 
   initWebSocket() {
-    // Hindari double-connect
     if (_ws && _ws.readyState === WebSocket.OPEN) return;
     if (_ws && _ws.readyState === WebSocket.CONNECTING) return;
 
     set({ wsStatus: "connecting" });
     _ws = new WebSocket(WS_URL);
-    
-    const patchedOnOpen = () => {
-      _reconnectDelay = 1000;   // reset exponential backoff
-      set({ wsStatus: "connected", quotes: {} });  // FIX F1: clear stale quotes
-    
-      // FIX F2: re-sync orders setelah reconnect — tangkap event yang mungkin terlewat
-      // usePortfolioStore diakses via getState() untuk hindari hook dependency
-      import("./usePortfolioStore").then(({ usePortfolioStore }) => {
-        usePortfolioStore.getState().fetchOrders();
-      });
+
+    // FIX: hapus fetchOrders dari sini — App.tsx useEffect([wsStatus])
+    // sudah handle ini. Memanggil di sini menyebabkan duplikasi request
+    // setiap kali koneksi terbuka.
+    _ws.onopen = () => {
+      _reconnectDelay = 1000;
+      set({ wsStatus: "connected", quotes: {} }); // clear stale quotes (F1)
     };
-    _ws.onopen = patchedOnOpen;
-    
+
     _ws.onmessage = (event) => {
-      // Tipe union: snapshot/update punya data Record<string, QuoteData>,
-      // order_triggered punya data object berbeda — pakai unknown lalu narrow.
       let msg: { type: string; data: unknown };
       try {
         msg = JSON.parse(event.data as string);
@@ -130,10 +120,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         return;
       }
 
-      // Routing berdasarkan type
       if (msg.type === "order_triggered") {
         usePortfolioStore.getState().handleWsMessage(msg);
-        return; // tidak update quotes
+        return;
       }
       if (msg.type === "snapshot") {
         set({ quotes: msg.data as Record<string, QuoteData> });
@@ -154,7 +143,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       _scheduleReconnect(get().initWebSocket);
     };
   },
-  
+
   disconnectWebSocket() {
     if (_reconnectTimer) {
       clearTimeout(_reconnectTimer);
@@ -162,7 +151,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     }
     _reconnectDelay = 1000;
     if (_ws) {
-      _ws.onclose = null;  // jangan trigger reconnect saat disconnect manual
+      _ws.onclose = null;
       _ws.close();
       _ws = null;
     }
@@ -199,8 +188,6 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       const res = await fetch(`${API_BASE}/api/market/search/${t}`);
       if (!res.ok) return null;
       const json = await res.json() as { ticker: string; price?: number; name?: string };
-      // Backend sudah mendaftarkan sebagai search_temp.
-      // Kembalikan QuoteData parsial jika ada, atau null.
       const existing = get().quotes[json.ticker];
       return existing ?? null;
     } catch (err) {
