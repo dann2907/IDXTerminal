@@ -9,6 +9,7 @@ import SearchBar from "./SearchBar";
 import OrdersPanel from "./portfolio/OrdersPanel";
 import TradeHistory from "./portfolio/TradeHistory";
 import PerformancePanel from "./portfolio/PerformancePanel";
+import Screener from "./components/market/Screener";
 import { useMarketStore } from "../stores/useMarketStore";
 import { usePortfolioStore } from "../stores/usePortfolioStore";
 
@@ -699,12 +700,22 @@ export default function IDXTerminal() {
               </div>
             )}
 
-            {/* SCREENER & ALERTS — placeholder */}
-            {(page === "SCREENER" || page === "ALERTS") && (
+{/* SCREENER */}
+            {page === "SCREENER" && (
+              <Screener
+                onSelectTicker={(ticker) => {
+                  setSelectedTicker(ticker);
+                  setPage("CHART");
+                }}
+              />
+            )}
+ 
+            {/* ALERTS — placeholder, Fase 5 */}
+            {page === "ALERTS" && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#4a6080", fontFamily: "'Syne',sans-serif", fontSize: 11 }}>
                 <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 24, marginBottom: 8 }}>{page === "SCREENER" ? "🔍" : "🔔"}</div>
-                  <div>{page === "SCREENER" ? "Stock Screener" : "Price Alerts"}</div>
+                  <div style={{ fontSize: 20, marginBottom: 8 }}>🔔</div>
+                  <div>Price Alerts</div>
                   <div style={{ fontSize: 9, marginTop: 4, color: "#2a4060" }}>Coming in Phase 5</div>
                 </div>
               </div>
