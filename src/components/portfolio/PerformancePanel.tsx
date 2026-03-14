@@ -12,19 +12,26 @@ import { usePortfolioStore, type TradeRecord } from "../../stores/usePortfolioSt
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface PerfData {
-  realized_pnl:   number;
-  win_rate:        number;
-  total_trades:    number;
-  winning_trades:  number;
-  best_trade:      number;
-  worst_trade:     number;
-  by_ticker:       Record<string, TickerStat>;
+  period: string
+  by_ticker: Record<string, TickerStat>
+
+  floating_pnl: number
+  total_realized: number
+
+  win_rate: number
+  total_trades: number
+  best_trade: number
+  worst_trade: number
 }
 
 interface TickerStat {
-  realized:    number;
-  trades:      number;
-  win_rate:    number;
+  buy_total: number
+  sell_total: number
+  trades: number
+  realized: number
+  realized_modal: number
+  pnl_rp: number
+  pnl_pct: number
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -172,14 +179,14 @@ export default function PerformancePanel() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, flexShrink: 0 }}>
         <MetricCard
           label="REALIZED P&L"
-          value={perf ? fmtRp(perf.realized_pnl) : "—"}
-          color={perf ? (perf.realized_pnl >= 0 ? "#00d68f" : "#ff4560") : "#c8d8f0"}
+          value={perf ? fmtRp(perf.total_realized) : "—"}
+          color={perf ? (perf.total_realized >= 0 ? "#00d68f" : "#ff4560") : "#c8d8f0"}
         />
         <MetricCard
-          label="WIN RATE"
-          value={perf ? `${perf.win_rate.toFixed(1)}%` : "—"}
-          color={perf && perf.win_rate >= 50 ? "#00d68f" : "#ff4560"}
-          sub={perf ? `${perf.winning_trades}/${perf.total_trades} trade` : ""}
+            label="WIN RATE"
+            value={perf ? `${perf.win_rate.toFixed(1)}%` : "—"}
+            color={perf && perf.win_rate >= 50 ? "#00d68f" : "#ff4560"}
+            sub={perf ? `${perf.total_trades} trades` : ""}
         />
         <MetricCard
           label="BEST TRADE"
@@ -208,7 +215,7 @@ export default function PerformancePanel() {
       </div>
 
       {/* ── Per-ticker table ── */}
-      {perf && Object.keys(perf.by_ticker).length > 0 && (
+      {perf && perf.by_ticker && Object.keys(perf.by_ticker).length > 0 && (
         <div style={{
           background:   "#070d1c",
           border:       "1px solid #0f2040",
@@ -230,18 +237,18 @@ export default function PerformancePanel() {
             </thead>
             <tbody>
               {Object.entries(perf.by_ticker)
-                .sort(([, a], [, b]) => b.realized - a.realized)
-                .map(([ticker, stat]) => (
+                    .sort(([, a], [, b]) => b.pnl_rp - a.pnl_rp)
+                    .map(([ticker, stat]) => (
                   <tr key={ticker} style={{ borderTop: "1px solid #0a1830" }}>
                     <td style={{ padding: "6px 12px", color: "#8aa8cc", fontWeight: 700 }}>
                       {ticker.replace(".JK", "")}
                     </td>
                     <td style={{
-                      padding: "6px 12px",
-                      color:   stat.realized >= 0 ? "#00d68f" : "#ff4560",
-                      fontFamily: "'Space Mono', monospace",
+                        padding: "6px 12px",
+                        color: stat.pnl_rp >= 0 ? "#00d68f" : "#ff4560",
+                        fontFamily: "'Space Mono', monospace",
                     }}>
-                      {fmtRp(stat.realized)}
+                        {fmtRp(stat.pnl_rp)}
                     </td>
                     <td style={{ padding: "6px 12px", color: "#c8d8f0" }}>
                       {stat.trades}
@@ -250,13 +257,13 @@ export default function PerformancePanel() {
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <div style={{
                           height:       6,
-                          width:        `${Math.max(4, stat.win_rate)}%`,
+                          width:        `${Math.max(4, Math.abs(stat.pnl_pct))}%`,
                           maxWidth:     80,
-                          background:   stat.win_rate >= 50 ? "#00d68f" : "#ff4560",
+                          background:   stat.pnl_pct >= 50 ? "#00d68f" : "#ff4560",
                           borderRadius: 3,
                         }} />
-                        <span style={{ color: stat.win_rate >= 50 ? "#00d68f" : "#ff4560", fontSize: 9 }}>
-                          {stat.win_rate.toFixed(0)}%
+                        <span style={{ color: stat.pnl_pct >= 50 ? "#00d68f" : "#ff4560", fontSize: 9 }}>
+                          {stat.pnl_pct.toFixed(2)}%
                         </span>
                       </div>
                     </td>

@@ -661,6 +661,7 @@ class PortfolioService:
 
         return {
             "period": period,
+            "by_ticker": stats,
             "per_ticker": stats,
             "floating_pnl": round(floating, 2),
             "total_realized": round(sum(s["pnl_rp"] for s in stats.values()), 2),
