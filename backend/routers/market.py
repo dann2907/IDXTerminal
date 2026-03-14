@@ -11,6 +11,7 @@
 
 import asyncio
 import logging
+import time
 from typing import Annotated
 
 import yfinance as yf
@@ -23,6 +24,32 @@ from services.ticker_registry import TickerRegistry, _normalize
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_SEARCH_CACHE_TTL = 300.0
+_search_cache: dict[str, dict] = {}
+_search_cache_ts: dict[str, float] = {}
+
+
+def _get_cached_search_payload(ticker: str) -> dict | None:
+    cached = _search_cache.get(ticker)
+    cached_at = _search_cache_ts.get(ticker, 0.0)
+    if cached is None:
+        return None
+    if time.monotonic() - cached_at >= _SEARCH_CACHE_TTL:
+        _search_cache.pop(ticker, None)
+        _search_cache_ts.pop(ticker, None)
+        return None
+    return cached
+
+
+def _set_cached_search_payload(ticker: str, payload: dict) -> None:
+    _search_cache[ticker] = payload
+    _search_cache_ts[ticker] = time.monotonic()
+
+
+def _invalidate_cached_search_payload(ticker: str) -> None:
+    _search_cache.pop(ticker, None)
+    _search_cache_ts.pop(ticker, None)
 
 # ── Dependency injection helpers (di-set oleh main.py) ───────────────────────
 # Kita pakai simple module-level singletons yang di-inject via dependency,
@@ -116,19 +143,25 @@ async def get_quote(ticker: str) -> JSONResponse:
     return JSONResponse(data)
 
 
-@router.get("/api/market/search/{query}")
-async def search_ticker(
+async def _search_ticker_impl(
     query: str,
-    registry: Annotated[TickerRegistry, Depends(_get_registry)],
+    registry: TickerRegistry,
+    *,
+    refresh: bool = False,
 ) -> JSONResponse:
-    """
-    Cari ticker dan daftarkan sebagai search_temp (TTL 5 menit).
-    Langsung fetch harga via yfinance dan kembalikan hasilnya.
-    """
     t = _normalize(query)
 
+    if refresh:
+        _invalidate_cached_search_payload(t)
+
+    cached = _get_cached_search_payload(t)
+    if cached is not None:
+        await registry.add_search(t)
+        logger.debug("Search cache hit: %s", t)
+        return JSONResponse(cached)
+
     # Validasi: cek apakah ticker valid di yfinance
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         info = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_ticker_info, t),
@@ -143,7 +176,7 @@ async def search_ticker(
     await registry.add_search(t)
     logger.info("Search registered: %s", t)
 
-    return JSONResponse({
+    payload = {
         "ticker": t,
         "found": True,
         "name": info.get("longName") or info.get("shortName") or t,
@@ -152,7 +185,35 @@ async def search_ticker(
         **({} if not (price := info.get("currentPrice") or info.get("previousClose")) else {
             "price": price,
         }),
-    })
+    }
+    _set_cached_search_payload(t, payload)
+    return JSONResponse(payload)
+
+
+@router.get("/api/market/search/{query}")
+async def search_ticker(
+    query: str,
+    registry: Annotated[TickerRegistry, Depends(_get_registry)],
+    refresh: bool = Query(False),
+) -> JSONResponse:
+    """
+    Canonical search endpoint: path parameter.
+    Cari ticker dan daftarkan sebagai search_temp (TTL 5 menit).
+    """
+    return await _search_ticker_impl(query, registry, refresh=refresh)
+
+
+@router.get("/api/market/search")
+async def search_ticker_query(
+    q: Annotated[str, Query(min_length=1)],
+    registry: Annotated[TickerRegistry, Depends(_get_registry)],
+    refresh: bool = Query(False),
+) -> JSONResponse:
+    """
+    Backward-compatible alias untuk caller lama yang masih memakai query param.
+    Bentuk kanonik tetap /api/market/search/{query}.
+    """
+    return await _search_ticker_impl(q, registry, refresh=refresh)
 
 
 @router.get("/api/market/candles/{ticker}")
@@ -167,7 +228,7 @@ async def get_candles(
     interval: 1m | 5m | 15m | 30m | 1h | 1d | 1wk | 1mo
     """
     t = _normalize(ticker)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         candles = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_candles, t, period, interval),
@@ -192,13 +253,12 @@ async def get_ihsg() -> JSONResponse:
       { "price": 7284.5, "change": 31.2, "change_pct": 0.43 }
     Kembalikan {} jika yfinance gagal (topbar tampilkan "—").
     """
-    import time  # noqa: PLC0415
     now = time.monotonic()
 
     if _ihsg_cache["data"] is not None and now - _ihsg_cache["ts"] < 60:
         return JSONResponse(_ihsg_cache["data"])
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         data = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_ihsg),

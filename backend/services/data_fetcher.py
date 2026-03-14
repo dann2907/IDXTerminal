@@ -377,7 +377,7 @@ class DataFetcher:
         FIX B6: Satu retry pada TimeoutError sebelum menyerah.
         Non-timeout error (delisted, bad response) tidak di-retry.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         for attempt in range(1 + _YFINANCE_RETRIES):
             try:
                 quote = await asyncio.wait_for(
