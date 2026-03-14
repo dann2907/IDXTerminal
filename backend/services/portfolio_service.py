@@ -15,8 +15,9 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from db.database import AsyncSessionLocal
 from models.portfolio import Holding, Order, PortfolioMeta, TradeHistory, Watchlist
@@ -45,6 +46,43 @@ class PortfolioService:
     Setiap method menerima AsyncSession sebagai parameter pertama agar
     unit test bisa inject session palsu tanpa menyentuh DB sungguhan.
     """
+
+    _LOCKED_ORDER_STATUSES = {"ACTIVE", "PENDING_CONFIRM"}
+    _CANCELLABLE_STATUSES = {"ACTIVE", "PENDING_CONFIRM"}
+
+    @staticmethod
+    async def _get_locked_summary(
+        db: AsyncSession,
+        ticker: str,
+        *,
+        exclude_order_id: Optional[str] = None,
+    ) -> tuple[int, int]:
+        q = select(Order).where(
+            Order.ticker == ticker,
+            Order.status.in_(PortfolioService._LOCKED_ORDER_STATUSES),
+        )
+        if exclude_order_id:
+            q = q.where(Order.order_id != exclude_order_id)
+
+        result = await db.execute(q)
+        orders = result.scalars().all()
+        tp_locked = sum(o.shares for o in orders if o.order_type == "TP")
+        sl_locked = sum(o.shares for o in orders if o.order_type == "SL")
+        return tp_locked, sl_locked
+
+    @staticmethod
+    async def _get_locked_shares(
+        db: AsyncSession,
+        ticker: str,
+        *,
+        exclude_order_id: Optional[str] = None,
+    ) -> int:
+        tp_locked, sl_locked = await PortfolioService._get_locked_summary(
+            db,
+            ticker,
+            exclude_order_id=exclude_order_id,
+        )
+        return max(tp_locked, sl_locked)
 
     # ── Bootstrap ─────────────────────────────────────────────────────────────
 
@@ -208,11 +246,14 @@ class PortfolioService:
         lots_or_shares: int,
         price: float,
         source: str = "MANUAL",
+        exclude_order_id: Optional[str] = None,
     ) -> tuple[bool, str]:
         """
         Jual saham. Gagal jika tidak punya saham atau jumlah tidak cukup.
-        Saat semua saham terjual, baris holding dihapus dan semua order
-        yang masih ACTIVE di-cancel (sama dengan portofolio.py asli).
+        Manual sell hanya boleh memakai saham yang tidak sedang dikunci
+        order ACTIVE/PENDING_CONFIRM. avg_cost tidak berubah saat partial sell.
+        Saat semua saham terjual, holding dihapus dan semua order lockable
+        untuk ticker itu dibatalkan agar tidak menyisakan state invalid.
         """
         ticker = ticker.upper().strip()
         is_idx = _is_idx(ticker)
@@ -237,6 +278,23 @@ class PortfolioService:
                 f"Saham tidak cukup. Kamu punya {owned_disp} {unit}"
             )
 
+        locked_shares = await PortfolioService._get_locked_shares(
+            db,
+            ticker,
+            exclude_order_id=exclude_order_id,
+        )
+        available_shares = max(0, holding.shares - locked_shares)
+        full_exit = shares == holding.shares
+        manual_full_exit = source == "MANUAL" and full_exit
+        if shares > available_shares and not manual_full_exit:
+            avail_disp = _to_lots(available_shares) if is_idx else available_shares
+            unit = "lot" if is_idx else "shares"
+            return False, (
+                f"Saham terkunci oleh order. Yang bisa dijual hanya {avail_disp} {unit}"
+            )
+
+        avg_cost = holding.avg_cost
+        _realized_pnl = (price - avg_cost) * shares
         proceeds = shares * price
 
         async with db.begin_nested():
@@ -246,15 +304,18 @@ class PortfolioService:
 
             if holding.shares == 0:
                 await db.delete(holding)
-                # Cancel semua order aktif untuk ticker ini
-                await db.execute(
+                # Posisi habis: batalkan semua order yang masih bisa mempengaruhi ticker.
+                cancel_q = (
                     update(Order)
-                    .where(Order.ticker == ticker, Order.status == "ACTIVE")
+                    .where(
+                        Order.ticker == ticker,
+                        Order.status.in_(PortfolioService._CANCELLABLE_STATUSES),
+                    )
                     .values(status="CANCELLED")
                 )
-            else:
-                # avg_cost tidak berubah saat sell (FIFO tidak dipakai)
-                pass
+                if exclude_order_id:
+                    cancel_q = cancel_q.where(Order.order_id != exclude_order_id)
+                await db.execute(cancel_q)
 
             db.add(TradeHistory(
                 action="SELL",
@@ -330,17 +391,9 @@ class PortfolioService:
         if holding is None:
             return False, f"Kamu tidak punya saham {ticker}"
 
-        # Hitung locked shares untuk OCO validation
-        active = await db.execute(
-            select(Order).where(
-                Order.ticker == ticker,
-                Order.status == "ACTIVE",
-            )
-        )
-        active_orders = active.scalars().all()
-
-        tp_locked = sum(o.shares for o in active_orders if o.order_type == "TP")
-        sl_locked = sum(o.shares for o in active_orders if o.order_type == "SL")
+        # PENDING_CONFIRM juga dianggap locked agar user tidak menumpuk
+        # order baru di atas saham yang sedang menunggu keputusan.
+        tp_locked, sl_locked = await PortfolioService._get_locked_summary(db, ticker)
 
         if order_type == "TP":
             locked_after = max(tp_locked + shares, sl_locked)
@@ -395,8 +448,6 @@ class PortfolioService:
             f"Order {order_type} dipasang: jual {lots} {unit} "
             f"{ticker} saat harga menyentuh {symbol}{trigger_price:,.0f}"
         )
-
-    _CANCELLABLE_STATUSES = {"ACTIVE", "PENDING_CONFIRM"}
 
     @staticmethod
     async def order_cancel(
@@ -459,29 +510,44 @@ class PortfolioService:
         """
         Kembalikan ORM objects langsung (bukan dict) agar order_checker
         bisa langsung mengubah status tanpa query ulang.
+        Jika satu ticker sudah punya order PENDING_CONFIRM, semua order ACTIVE
+        ticker itu di-skip sampai user confirm/dismiss agar notifikasi tidak spam.
         """
+        pending_order = aliased(Order)
         result = await db.execute(
-            select(Order).where(Order.status == "ACTIVE")
+            select(Order).where(
+                Order.status == "ACTIVE",
+                ~exists(
+                    select(1).where(
+                        pending_order.ticker == Order.ticker,
+                        pending_order.status == "PENDING_CONFIRM",
+                    )
+                ),
+            )
         )
         return result.scalars().all()
 
     @staticmethod
     async def mark_order_pending(
         db: AsyncSession, order_id: str, current_price: float
-    ) -> None:
+    ) -> bool:
         """
         Set status order menjadi PENDING_CONFIRM dan catat waktu trigger.
         Dipanggil oleh OrderChecker saat harga menyentuh level TP/SL.
         """
-        await db.execute(
+        result = await db.execute(
             update(Order)
-            .where(Order.order_id == order_id)
+            .where(
+                Order.order_id == order_id,
+                Order.status == "ACTIVE",
+            )
             .values(
                 status="PENDING_CONFIRM",
                 triggered_at=datetime.utcnow(),
             )
         )
         await db.commit()
+        return result.rowcount > 0
 
     @staticmethod
     async def confirm_order(
@@ -503,7 +569,12 @@ class PortfolioService:
 
         # Eksekusi sell
         ok, msg = await PortfolioService.sell(
-            db, order.ticker, order.lots, price, source=order.order_type
+            db,
+            order.ticker,
+            order.lots,
+            price,
+            source=order.order_type,
+            exclude_order_id=order.order_id,
         )
         if not ok:
             # Kembalikan ke ACTIVE jika sell gagal (misalnya shares berubah)

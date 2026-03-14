@@ -80,7 +80,11 @@ class OrderChecker:
                             continue
 
                         # Set ke PENDING_CONFIRM
-                        await PortfolioService.mark_order_pending(db, order.order_id, price)
+                        marked = await PortfolioService.mark_order_pending(
+                            db, order.order_id, price
+                        )
+                        if not marked:
+                            continue
                         logger.info(
                             "Order %s triggered: %s %s @ %.0f (trigger=%.0f)",
                             order.order_id, order.order_type, ticker,
