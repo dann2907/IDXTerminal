@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 class OrderChecker:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
+        self._lock = asyncio.Lock()
 
     def start(self, broadcaster: "WSBroadcaster") -> None:
         """
@@ -50,63 +51,63 @@ class OrderChecker:
         """
         if not prices:
             return
+        async with self._lock:
+            async with AsyncSessionLocal() as db:
+                orders = await PortfolioService.get_active_orders_for_check(db)
+                if not orders:
+                    return
 
-        async with AsyncSessionLocal() as db:
-            orders = await PortfolioService.get_active_orders_for_check(db)
-            if not orders:
-                return
+                # Kelompokkan per ticker, SL duluan dalam list
+                by_ticker: dict[str, list] = {}
+                for o in orders:
+                    if o.ticker in prices:
+                        by_ticker.setdefault(o.ticker, [])
+                        # SL masuk di depan (prioritas lebih tinggi)
+                        if o.order_type == "SL":
+                            by_ticker[o.ticker].insert(0, o)
+                        else:
+                            by_ticker[o.ticker].append(o)
 
-            # Kelompokkan per ticker, SL duluan dalam list
-            by_ticker: dict[str, list] = {}
-            for o in orders:
-                if o.ticker in prices:
-                    by_ticker.setdefault(o.ticker, [])
-                    # SL masuk di depan (prioritas lebih tinggi)
-                    if o.order_type == "SL":
-                        by_ticker[o.ticker].insert(0, o)
-                    else:
-                        by_ticker[o.ticker].append(o)
+                for ticker, ticker_orders in by_ticker.items():
+                    price = prices[ticker]
+                    for order in ticker_orders:
+                        triggered = (
+                            order.order_type == "TP" and price >= order.trigger_price
+                            or
+                            order.order_type == "SL" and price <= order.trigger_price
+                        )
+                        if not triggered:
+                            continue
 
-            for ticker, ticker_orders in by_ticker.items():
-                price = prices[ticker]
-                for order in ticker_orders:
-                    triggered = (
-                        order.order_type == "TP" and price >= order.trigger_price
-                        or
-                        order.order_type == "SL" and price <= order.trigger_price
-                    )
-                    if not triggered:
-                        continue
+                        # Set ke PENDING_CONFIRM
+                        await PortfolioService.mark_order_pending(db, order.order_id, price)
+                        logger.info(
+                            "Order %s triggered: %s %s @ %.0f (trigger=%.0f)",
+                            order.order_id, order.order_type, ticker,
+                            price, order.trigger_price,
+                        )
 
-                    # Set ke PENDING_CONFIRM
-                    await PortfolioService.mark_order_pending(db, order.order_id, price)
-                    logger.info(
-                        "Order %s triggered: %s %s @ %.0f (trigger=%.0f)",
-                        order.order_id, order.order_type, ticker,
-                        price, order.trigger_price,
-                    )
+                        # Broadcast ke frontend untuk konfirmasi
+                        symbol = "Rp" if ticker.endswith(".JK") else "$"
+                        await self._broadcaster.broadcast({
+                            "type": "order_triggered",
+                            "data": {
+                                "order_id": order.order_id,
+                                "ticker": ticker,
+                                "order_type": order.order_type,
+                                "trigger_price": order.trigger_price,
+                                "current_price": price,
+                                "lots": order.lots,
+                                "shares": order.shares,
+                                "symbol": symbol,
+                                "message": (
+                                    f"{order.order_type} order untuk {ticker} terpicu! "
+                                    f"Harga {symbol}{price:,.0f} menyentuh target "
+                                    f"{symbol}{order.trigger_price:,.0f}. Eksekusi sekarang?"
+                                ),
+                            },
+                        })
 
-                    # Broadcast ke frontend untuk konfirmasi
-                    symbol = "Rp" if ticker.endswith(".JK") else "$"
-                    await self._broadcaster.broadcast({
-                        "type": "order_triggered",
-                        "data": {
-                            "order_id": order.order_id,
-                            "ticker": ticker,
-                            "order_type": order.order_type,
-                            "trigger_price": order.trigger_price,
-                            "current_price": price,
-                            "lots": order.lots,
-                            "shares": order.shares,
-                            "symbol": symbol,
-                            "message": (
-                                f"{order.order_type} order untuk {ticker} terpicu! "
-                                f"Harga {symbol}{price:,.0f} menyentuh target "
-                                f"{symbol}{order.trigger_price:,.0f}. Eksekusi sekarang?"
-                            ),
-                        },
-                    })
-
-                    # Hanya proses satu order per ticker per poll
-                    # (SL yang diprioritaskan sudah ada di posisi pertama list)
-                    break
+                        # Hanya proses satu order per ticker per poll
+                        # (SL yang diprioritaskan sudah ada di posisi pertama list)
+                        break

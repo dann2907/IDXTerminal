@@ -360,23 +360,23 @@ class PortfolioService:
                 return False, (
                 f"Take Profit ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
                 f"tidak ada keuntungan. Gunakan harga di atas {symbol}{avg_cost:,.0f}."
-            )
+                )
             if trigger_price < avg_cost:
                 return False, (
                 f"Take Profit ({symbol}{trigger_price:,.0f}) harus lebih tinggi "
                 f"dari avg cost ({symbol}{avg_cost:,.0f})."
-            )
+                )
         elif order_type == "SL":
             if trigger_price == avg_cost:
                 return False, (
                 f"Stop Loss ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
                 f"tidak ada perlindungan modal. Gunakan harga di bawah {symbol}{avg_cost:,.0f}."
-            )
+                )
             if trigger_price > avg_cost:
                 return False, (
                 f"Stop Loss ({symbol}{trigger_price:,.0f}) harus lebih rendah "
                 f"dari avg cost ({symbol}{avg_cost:,.0f})."
-        )
+                )
 
         oid = str(uuid.uuid4())[:8]
         db.add(Order(
