@@ -10,6 +10,7 @@
 # Shutdown: hentikan DataFetcher dan TickerRegistry cleanup task.
 
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -111,21 +112,49 @@ def _patch_broadcaster_with_order_check() -> None:
     """
     Wrap broadcaster.update_cache() agar setiap kali harga baru masuk,
     order_checker.check() dipanggil dengan snapshot harga terbaru.
-
-    Ini lebih sederhana dari event bus penuh — cukup untuk single-user app.
-    Tidak mengubah interface WSBroadcaster agar mudah di-test.
+    FIX B2: Tambah error handler + done_callback agar exception tidak
+    ditelan diam-diam.
     """
     original_update = broadcaster.update_cache
 
-    def patched_update(data):  # noqa: ANN001
-        original_update(data)
-        # Jadwalkan pengecekan order — jangan await di sini karena
-        # update_cache bukan coroutine. Gunakan create_task.
-        import asyncio  # noqa: PLC0415
-        prices = {t: q.price for t, q in data.items()}
-        asyncio.create_task(order_checker.check(prices))
+    def _on_task_done(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error(
+                "OrderChecker background task failed: %s",
+                exc,
+                exc_info=exc,
+            )
 
-    broadcaster.update_cache = patched_update  # type: ignore[method-assign]
+    def patched_update(data) -> None:  # noqa: ANN001
+        original_update(data)
+
+        async def _safe_check() -> None:
+            try:
+                prices = {
+                    ticker: float(q["price"])
+                    for ticker, q in broadcaster.get_snapshot().items()
+                }
+                await order_checker.check(prices)
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.error(
+                    "OrderChecker.check() raised: %s",
+                    exc,
+                    exc_info=True,
+                )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("OrderChecker: no running event loop, skipping check")
+            return
+
+        task = loop.create_task(_safe_check())
+        task.add_done_callback(_on_task_done)
+
+    broadcaster.update_cache = patched_update
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────

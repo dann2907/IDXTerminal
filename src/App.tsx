@@ -17,13 +17,22 @@ import { usePortfolioStore } from "./stores/usePortfolioStore";
 
 export default function App() {
   const initWebSocket = useMarketStore(s => s.initWebSocket);
-  const refreshAll    = usePortfolioStore(s => s.refreshAll);
-
+  const wsStatus = useMarketStore(s => s.wsStatus);
+  const fetchOrders = usePortfolioStore(s => s.fetchOrders);
+  // Mount: mulai WS + fetch data non-WS paralel (tidak tunggu koneksi)
   useEffect(() => {
     initWebSocket();
-    refreshAll();
+    const { fetchSummary, fetchHoldings, fetchWatchlist } =
+      usePortfolioStore.getState();
+    Promise.all([fetchSummary(), fetchHoldings(), fetchWatchlist()]);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
+  // FIX F2: fetchOrders SETELAH WS connected — tangkap PENDING_CONFIRM
+  // yang mungkin terpicu saat app tertutup atau selama jendela reconnect
+  useEffect(() => {
+    if (wsStatus === "connected") {
+      fetchOrders();
+    }
+  }, [wsStatus, fetchOrders]);
   return (
     <>
       <IDXTerminal />

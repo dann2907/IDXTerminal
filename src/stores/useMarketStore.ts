@@ -10,7 +10,6 @@
 
 import { create } from "zustand";
 import { usePortfolioStore } from "./usePortfolioStore";
-
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface QuoteData {
@@ -108,12 +107,19 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
     set({ wsStatus: "connecting" });
     _ws = new WebSocket(WS_URL);
-
-    _ws.onopen = () => {
-      _reconnectDelay = 1000; // reset backoff
-      set({ wsStatus: "connected" });
+    
+    const patchedOnOpen = () => {
+      _reconnectDelay = 1000;   // reset exponential backoff
+      set({ wsStatus: "connected", quotes: {} });  // FIX F1: clear stale quotes
+    
+      // FIX F2: re-sync orders setelah reconnect — tangkap event yang mungkin terlewat
+      // usePortfolioStore diakses via getState() untuk hindari hook dependency
+      import("./usePortfolioStore").then(({ usePortfolioStore }) => {
+        usePortfolioStore.getState().fetchOrders();
+      });
     };
-
+    _ws.onopen = patchedOnOpen;
+    
     _ws.onmessage = (event) => {
       // Tipe union: snapshot/update punya data Record<string, QuoteData>,
       // order_triggered punya data object berbeda — pakai unknown lalu narrow.
@@ -148,7 +154,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       _scheduleReconnect(get().initWebSocket);
     };
   },
-
+  
   disconnectWebSocket() {
     if (_reconnectTimer) {
       clearTimeout(_reconnectTimer);

@@ -71,7 +71,8 @@ _IDX_TIMEOUT    = aiohttp.ClientTimeout(total=15)  # snapshot lebih besar, naikk
 _IDX_BATCH_DELAY = 0.35   # detik antar ticker, masih dipakai oleh fallback per-ticker
 _POLL_INTERVAL   = 15     # detik antar full poll cycle
 _YFINANCE_TIMEOUT = 10    # detik untuk yfinance request
-
+_YFINANCE_RETRIES = 1      
+_YFINANCE_RETRY_DELAY = 2 # detik tunggu sebelum retry
 
 # ── QuoteData ─────────────────────────────────────────────────────────────────
 
@@ -289,23 +290,38 @@ class DataFetcher:
 
         for row in rows:
             try:
+                # StockCode adalah field utama di GetSecuritiesStock
                 code = (
-                    row.get("Code") or row.get("StockCode") or row.get("code") or ""
+                    row.get("StockCode") or row.get("Code") or row.get("code") or ""
                 ).strip()
                 if not code:
                     skipped += 1
                     continue
 
                 ticker = f"{code}.JK"
-                price = float(row.get("LastPrice") or row.get("lastPrice") or 0)
+
+                # FIX: Snapshot pakai "Close", bukan "LastPrice"
+                price = float(
+                    row.get("Close") or row.get("LastPrice") or row.get("lastPrice") or 0
+                )
                 if price <= 0:
                     skipped += 1
                     continue
 
-                prev_close = float(row.get("PreviousPrice") or row.get("previousPrice") or price)
-                open_  = float(row.get("OpenPrice")  or row.get("openPrice")  or price)
-                high   = float(row.get("HighPrice")  or row.get("highPrice")  or price)
-                low    = float(row.get("LowPrice")   or row.get("lowPrice")   or price)
+                # FIX: "Previous" bukan "PreviousPrice"
+                prev_close = float(
+                    row.get("Previous") or row.get("PreviousPrice")
+                    or row.get("previousPrice") or price
+                )
+                open_ = float(row.get("OpenPrice") or row.get("openPrice") or price)
+                # FIX: "High"/"Low" bukan "HighPrice"/"LowPrice"
+                high = float(
+                    row.get("High") or row.get("HighPrice") or row.get("highPrice") or price
+                )
+                low = float(
+                    row.get("Low") or row.get("LowPrice") or row.get("lowPrice") or price
+                )
+                # Volume snapshot sudah dalam satuan LEMBAR — tidak perlu konversi lot
                 volume = int(float(row.get("Volume") or row.get("volume") or 0))
 
                 results[ticker] = QuoteData(
@@ -318,7 +334,8 @@ class DataFetcher:
                     volume=volume,
                     is_live=True,
                 )
-            except Exception:  # pylint: disable=broad-except
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.debug("IDX snapshot: skip row error: %s | row=%s", exc, row)
                 skipped += 1
                 continue
 
@@ -356,22 +373,37 @@ class DataFetcher:
 
     async def _fetch_yfinance(self, ticker_jk: str) -> QuoteData | None:
         """
-        Fetch last-close dari yfinance secara async
-        (jalankan blocking call di thread pool agar tidak block event loop).
+        Fetch last-close dari yfinance secara async.
+        FIX B6: Satu retry pada TimeoutError sebelum menyerah.
+        Non-timeout error (delisted, bad response) tidak di-retry.
         """
         loop = asyncio.get_event_loop()
-        try:
-            quote = await asyncio.wait_for(
-                loop.run_in_executor(None, _blocking_yfinance, ticker_jk),
-                timeout=_YFINANCE_TIMEOUT,
-            )
-            return quote
-        except asyncio.TimeoutError:
-            logger.debug("yfinance timeout: %s", ticker_jk)
-            return None
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.debug("yfinance error %s: %s", ticker_jk, exc)
-            return None
+        for attempt in range(1 + _YFINANCE_RETRIES):
+            try:
+                quote = await asyncio.wait_for(
+                    loop.run_in_executor(None, _blocking_yfinance, ticker_jk),
+                    timeout=_YFINANCE_TIMEOUT,
+                )
+                return quote
+            except asyncio.TimeoutError:
+                if attempt < _YFINANCE_RETRIES:
+                    logger.debug(
+                        "yfinance timeout %s (attempt %d/%d), retry dalam %ds",
+                        ticker_jk, attempt + 1,
+                        1 + _YFINANCE_RETRIES, _YFINANCE_RETRY_DELAY,
+                    )
+                    await asyncio.sleep(_YFINANCE_RETRY_DELAY)
+                else:
+                    logger.debug(
+                        "yfinance timeout %s setelah %d percobaan",
+                        ticker_jk, 1 + _YFINANCE_RETRIES,
+                    )
+                    return None
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.debug("yfinance error %s: %s", ticker_jk, exc)
+                return None  # Jangan retry non-timeout error
+
+        return None
 
 
 # ── Parsers (modul-level, bukan method, mudah di-test) ───────────────────────

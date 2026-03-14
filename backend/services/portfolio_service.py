@@ -300,6 +300,7 @@ class PortfolioService:
 
     # ── Orders ────────────────────────────────────────────────────────────────
 
+    
     @staticmethod
     async def order_add(
         db: AsyncSession,
@@ -354,16 +355,28 @@ class PortfolioService:
             )
 
         avg_cost = holding.avg_cost
-        if order_type == "TP" and trigger_price <= avg_cost:
-            return False, (
+        if order_type == "TP":
+            if trigger_price == avg_cost:
+                return False, (
+                f"Take Profit ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
+                f"tidak ada keuntungan. Gunakan harga di atas {symbol}{avg_cost:,.0f}."
+            )
+            if trigger_price < avg_cost:
+                return False, (
                 f"Take Profit ({symbol}{trigger_price:,.0f}) harus lebih tinggi "
                 f"dari avg cost ({symbol}{avg_cost:,.0f})."
             )
-        if order_type == "SL" and trigger_price >= avg_cost:
-            return False, (
+        elif order_type == "SL":
+            if trigger_price == avg_cost:
+                return False, (
+                f"Stop Loss ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
+                f"tidak ada perlindungan modal. Gunakan harga di bawah {symbol}{avg_cost:,.0f}."
+            )
+            if trigger_price > avg_cost:
+                return False, (
                 f"Stop Loss ({symbol}{trigger_price:,.0f}) harus lebih rendah "
                 f"dari avg cost ({symbol}{avg_cost:,.0f})."
-            )
+        )
 
         oid = str(uuid.uuid4())[:8]
         db.add(Order(
@@ -383,19 +396,30 @@ class PortfolioService:
             f"{ticker} saat harga menyentuh {symbol}{trigger_price:,.0f}"
         )
 
+    _CANCELLABLE_STATUSES = {"ACTIVE", "PENDING_CONFIRM"}
+
     @staticmethod
     async def order_cancel(
         db: AsyncSession, order_id: str
     ) -> tuple[bool, str]:
+        """
+        Cancel order. Berlaku untuk status ACTIVE dan PENDING_CONFIRM.
+        EXECUTED dan CANCELLED sudah final.
+        """
         result = await db.execute(
-            select(Order).where(
-                Order.order_id == order_id,
-                Order.status == "ACTIVE",
-            )
+            select(Order).where(Order.order_id == order_id)
         )
         order = result.scalar_one_or_none()
+
         if order is None:
-            return False, f"Order {order_id} tidak ditemukan atau sudah tidak aktif"
+            return False, f"Order {order_id} tidak ditemukan"
+
+        if order.status not in PortfolioService._CANCELLABLE_STATUSES:
+            return False, (
+                f"Order {order_id} tidak bisa dibatalkan "
+                f"(status saat ini: {order.status})"
+            )
+
         order.status = "CANCELLED"
         await db.commit()
         return True, f"Order {order_id} dibatalkan"
@@ -670,7 +694,6 @@ class PortfolioService:
             "best_trade": round(max(trade_results), 2) if trade_results else 0,
             "worst_trade": round(min(trade_results), 2) if trade_results else 0,
         }
-
 
 def _empty_stat() -> dict:
     return {

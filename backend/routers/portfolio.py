@@ -24,6 +24,7 @@
 import logging
 from typing import Optional
 
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -253,20 +254,26 @@ async def cancel_order(order_id: str) -> JSONResponse:
         raise HTTPException(status_code=404, detail=msg)
     return JSONResponse({"ok": True, "message": msg})
 
-
 @router.get("/watchlist")
 async def get_watchlist() -> JSONResponse:
     """Daftar ticker di watchlist beserta harga terkini dari cache."""
+    # Import lazy untuk hindari circular
+    from db.database import AsyncSessionLocal  # noqa: PLC0415
+    from services.portfolio_service import PortfolioService  # noqa: PLC0415
+ 
     prices = _current_prices()
     async with AsyncSessionLocal() as db:
         tickers = await PortfolioService.get_watchlist(db)
-
+ 
     result = []
     for ticker in tickers:
-        quote = prices.get(ticker, {})
+        # FIX: prices berisi float langsung (dari _current_prices()),
+        # bukan dict. Sebelumnya: isinstance(quote, (int,float)) selalu False
+        # karena quote = prices.get(ticker, {}) = {} (dict), bukan float.
+        price: Optional[float] = prices.get(ticker)  # float atau None
         result.append({
             "ticker": ticker,
-            "price": quote if isinstance(quote, (int, float)) else prices.get(ticker),
+            "price": price,
         })
     return JSONResponse(result)
 
