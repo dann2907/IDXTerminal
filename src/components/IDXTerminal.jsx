@@ -9,7 +9,8 @@ import SearchBar from "./SearchBar";
 import OrdersPanel from "./portfolio/OrdersPanel";
 import TradeHistory from "./portfolio/TradeHistory";
 import PerformancePanel from "./portfolio/PerformancePanel";
-import Screener from "./components/market/Screener";
+import AlertsPanel from "./alerts/AlertsPanel";
+import Screener from "./market/Screener";
 import { useMarketStore } from "../stores/useMarketStore";
 import { usePortfolioStore } from "../stores/usePortfolioStore";
 
@@ -709,9 +710,11 @@ export default function IDXTerminal() {
                 }}
               />
             )}
+
+            {page === "ALERTS" && <AlertsPanel />}
  
             {/* ALERTS — placeholder, Fase 5 */}
-            {page === "ALERTS" && (
+            {false && page === "ALERTS" && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#4a6080", fontFamily: "'Syne',sans-serif", fontSize: 11 }}>
                 <div style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 20, marginBottom: 8 }}>🔔</div>

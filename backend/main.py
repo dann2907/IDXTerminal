@@ -18,10 +18,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from db.database import AsyncSessionLocal, engine
-from models.portfolio import Base, Holding, Watchlist
-from routers import alerts, auth, market, portfolio
+from db.database import AsyncSessionLocal, Base as DBBase, engine
+from models.portfolio import Base as PortfolioBase, Holding, Watchlist
+from routers import auth, market, portfolio
+from routers.alerts import router as alerts_router
+from routers.alerts import export_router
 from services.data_fetcher import DataFetcher
+from services.alert_checker import AlertChecker
 from services.order_checker import OrderChecker
 from services.portfolio_service import PortfolioService
 from services.ticker_registry import TickerRegistry
@@ -40,14 +43,18 @@ registry    = TickerRegistry()
 broadcaster = WSBroadcaster()
 fetcher     = DataFetcher()
 order_checker = OrderChecker()
+alert_checker = AlertChecker()
 
 
 # ── Startup helpers ───────────────────────────────────────────────────────────
 
 async def _init_db() -> None:
     """Buat semua tabel jika belum ada. Idempoten."""
+    import models  # noqa: F401
+
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(PortfolioBase.metadata.create_all)
+        await conn.run_sync(DBBase.metadata.create_all)
     logger.info("Database tables ready")
 
 
@@ -94,6 +101,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     # OrderChecker tidak punya loop sendiri — ia di-trigger oleh DataFetcher
     # lewat callback yang di-inject ke broadcaster.
     order_checker.start(broadcaster)
+    alert_checker.start(broadcaster)
     # Patch broadcaster agar memanggil order_checker.check() setelah setiap update
     _patch_broadcaster_with_order_check()
 
@@ -133,11 +141,13 @@ def _patch_broadcaster_with_order_check() -> None:
 
         async def _safe_check() -> None:
             try:
+                snapshot = broadcaster.get_snapshot()
                 prices = {
                     ticker: float(q["price"])
-                    for ticker, q in broadcaster.get_snapshot().items()
+                    for ticker, q in snapshot.items()
                 }
                 await order_checker.check(prices)
+                await alert_checker.check(snapshot)
             except Exception as exc:  # pylint: disable=broad-except
                 logger.error(
                     "OrderChecker.check() raised: %s",
@@ -172,7 +182,8 @@ app.add_middleware(
 app.include_router(market.router)
 app.include_router(portfolio.router)
 app.include_router(auth.router)
-app.include_router(alerts.router)
+app.include_router(alerts_router)
+app.include_router(export_router)
 
 
 @app.get("/health")

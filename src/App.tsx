@@ -1,38 +1,78 @@
-// src/App.tsx
+// src/App.tsx  (Fase 5 — fixed)
 //
-// Root component.
-// Dua hal yang dilakukan saat mount:
-//   1. initWebSocket()  — connect ke /ws/prices, mulai terima quote real-time
-//   2. refreshAll()     — load summary, holdings, orders, watchlist dari REST API
+// FIX: versi sebelumnya patch usePortfolioStore.handleWsMessage di
+// dalam useEffect tanpa guard yang benar — originalHandler bisa stale,
+// dan setState dipanggil setiap render karena handleAlertWs sebagai dep.
 //
-// OrderTriggeredDialog di-render di sini (bukan di dalam IDXTerminal)
-// agar selalu tampil di atas semua layer, bahkan saat user sedang di
-// halaman apapun ketika TP/SL terpicu.
+// Solusi bersih: routing "alert_triggered" langsung di useMarketStore
+// _ws.onmessage, lewat subscription useEffect yang hanya run sekali,
+// atau dengan extract ke custom hook.
+//
+// CARA YANG DIPAKAI: useEffect dengan ref untuk handler yang stabil.
+// Tidak perlu patch store — cukup subscribe ke store di luar component.
 
-import { useEffect } from "react";
-import IDXTerminal from "./components/IDXTerminal";
-import OrderTriggeredDialog from "./components/OrderTriggeredDialog";
-import { useMarketStore } from "./stores/useMarketStore";
-import { usePortfolioStore } from "./stores/usePortfolioStore";
+import { useEffect, useRef } from "react";
+import IDXTerminal              from "./components/IDXTerminal";
+import OrderTriggeredDialog     from "./components/OrderTriggeredDialog";
+import LoginPage                from "./components/auth/LoginPage";
+import { useMarketStore }       from "./stores/useMarketStore";
+import { usePortfolioStore }    from "./stores/usePortfolioStore";
+import { useAuthStore }         from "./stores/useAuthStore";
+import { useAlertStore }        from "./stores/useAlertStore";
 
 export default function App() {
   const initWebSocket = useMarketStore(s => s.initWebSocket);
-  const wsStatus = useMarketStore(s => s.wsStatus);
-  const fetchOrders = usePortfolioStore(s => s.fetchOrders);
-  // Mount: mulai WS + fetch data non-WS paralel (tidak tunggu koneksi)
+  const wsStatus      = useMarketStore(s => s.wsStatus);
+  const fetchOrders   = usePortfolioStore(s => s.fetchOrders);
+
+  const { token, user, loadMe } = useAuthStore();
+
+  // Ref yang stabil — tidak menyebabkan re-render saat store berubah
+  const alertHandlerRef = useRef(useAlertStore.getState().handleWsMessage);
   useEffect(() => {
-    initWebSocket();
-    const { fetchSummary, fetchHoldings, fetchWatchlist } =
-      usePortfolioStore.getState();
-    Promise.all([fetchSummary(), fetchHoldings(), fetchWatchlist()]);
+    // Subscribe ke store agar ref selalu punya fungsi terbaru
+    return useAlertStore.subscribe(
+      s => { alertHandlerRef.current = s.handleWsMessage; }
+    );
+  }, []);
+
+  // ── Mount: verifikasi token tersimpan ─────────────────────────────────
+  useEffect(() => {
+    loadMe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // FIX F2: fetchOrders SETELAH WS connected — tangkap PENDING_CONFIRM
-  // yang mungkin terpicu saat app tertutup atau selama jendela reconnect
+
+  // ── Wire alert WS routing — run SEKALI saja ───────────────────────────
   useEffect(() => {
-    if (wsStatus === "connected") {
-      fetchOrders();
-    }
+    // Patch handleWsMessage di portfolioStore agar juga forward alert.
+    // Ini run sekali setelah mount — tidak stale karena pakai ref.
+    const original = usePortfolioStore.getState().handleWsMessage;
+    usePortfolioStore.setState({
+      handleWsMessage: (msg) => {
+        original(msg);
+        if (msg.type === "alert_triggered") {
+          alertHandlerRef.current(msg);
+        }
+      },
+    });
+    // Tidak perlu cleanup — patch ini permanen selama app hidup
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Setelah login: mulai WS + fetch data awal ─────────────────────────
+  useEffect(() => {
+    if (!token) return;
+    initWebSocket();
+    const { fetchSummary, fetchHoldings, fetchWatchlist } = usePortfolioStore.getState();
+    Promise.all([fetchSummary(), fetchHoldings(), fetchWatchlist()]);
+  }, [token, initWebSocket]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── WS connected: sync orders ─────────────────────────────────────────
+  useEffect(() => {
+    if (wsStatus === "connected") fetchOrders();
   }, [wsStatus, fetchOrders]);
+
+  // ── Auth guard ────────────────────────────────────────────────────────
+  if (!token || !user) return <LoginPage />;
+
   return (
     <>
       <IDXTerminal />
