@@ -54,8 +54,8 @@ idx-terminal/
 │   │   ├── auth.py
 │   │   └── alerts.py
 │   ├── services/
-│   │   ├── data_fetcher.py       # Migrate dari app lama
-│   │   ├── portfolio_service.py  # Migrate dari portofolio.py
+│   │   ├── data_fetcher.py       
+│   │   ├── portfolio_service.py  
 │   │   ├── alert_service.py
 │   │   └── ws_broadcaster.py
 │   ├── models/
