@@ -115,6 +115,16 @@ const CSS = `
   }
   .watchlist-item:hover { background: #0a1628; border-left-color: #1e3a5f; }
   .watchlist-item.active { background: #0a1e38; border-left-color: #00d68f; }
+  .watchlist-item-wrap { position: relative; }
+  .watchlist-item-wrap .wi-remove {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    display: none;
+    padding: 1px 4px; font-size: 9px; line-height: 1;
+    background: rgba(255,69,96,0.15);
+    border: 1px solid rgba(255,69,96,0.35);
+    border-radius: 3px; color: #ff4560; cursor: pointer;
+  }
+  .watchlist-item-wrap:hover .wi-remove { display: block; }
   .wi-sym { font-size: 10px; color: #8aa8cc; font-weight: 700; }
   .wi-price { font-size: 10px; color: #c8d8f0; }
   .wi-ch { font-size: 9px; }
@@ -295,9 +305,11 @@ export default function IDXTerminal() {
 
   const summary   = usePortfolioStore(s => s.summary);
   const holdings  = usePortfolioStore(s => s.holdings);
-  const watchlist = usePortfolioStore(s => s.watchlist);
-  const buy       = usePortfolioStore(s => s.buy);
-  const sell      = usePortfolioStore(s => s.sell);
+  const watchlist           = usePortfolioStore(s => s.watchlist);
+  const addToWatchlist      = usePortfolioStore(s => s.addToWatchlist);
+  const removeFromWatchlist = usePortfolioStore(s => s.removeFromWatchlist);
+  const buy                 = usePortfolioStore(s => s.buy);
+  const sell                = usePortfolioStore(s => s.sell);
 
   // ── Local state ───────────────────────────────────────────────────────
   const [page, setPage]           = useState("CHART");
@@ -316,6 +328,14 @@ export default function IDXTerminal() {
     setSelectedTicker(ticker);
     setPage("CHART");
   }, []);
+
+  const toggleSelectedWatchlist = useCallback(async () => {
+    if (watchlist.includes(selectedTicker)) {
+      await removeFromWatchlist(selectedTicker);
+      return;
+    }
+    await addToWatchlist(selectedTicker);
+  }, [addToWatchlist, removeFromWatchlist, selectedTicker, watchlist]);
 
   const prevQuotesRef = useRef({});
 
@@ -442,21 +462,30 @@ export default function IDXTerminal() {
                 const fl = flashMap[ticker];
                 const spark = sparkRef.current[ticker] || [];
                 return (
-                  <div key={ticker}
-                    className={`watchlist-item${selectedTicker === ticker ? " active" : ""}${fl ? " flash-" + fl : ""}`}
-                    onClick={() => { setSelectedTicker(ticker); setPage("CHART"); }}>
-                    <div>
-                      <div className="wi-sym">{ticker.replace(".JK", "")}</div>
-                      <div className="wi-spark">
-                        <Sparkline data={spark} color={q && q.change_pct >= 0 ? "#00d68f" : "#ff4560"} width={60} height={20} />
+                  <div key={ticker} style={{ position: "relative" }}
+                    className="watchlist-item-wrap">
+                    <div
+                      className={`watchlist-item${selectedTicker === ticker ? " active" : ""}${fl ? " flash-" + fl : ""}`}
+                      onClick={() => { setSelectedTicker(ticker); setPage("CHART"); }}>
+                      <div>
+                        <div className="wi-sym">{ticker.replace(".JK", "")}</div>
+                        <div className="wi-spark">
+                          <Sparkline data={spark} color={q && q.change_pct >= 0 ? "#00d68f" : "#ff4560"} width={60} height={20} />
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div className="wi-price">{q ? fmtPrice(q.price) : "—"}</div>
+                        <div className={`wi-ch ${q && q.change_pct >= 0 ? "up" : "dn"}`}>
+                          {q ? fmtPct(q.change_pct) : ""}
+                        </div>
                       </div>
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div className="wi-price">{q ? fmtPrice(q.price) : "—"}</div>
-                      <div className={`wi-ch ${q && q.change_pct >= 0 ? "up" : "dn"}`}>
-                        {q ? fmtPct(q.change_pct) : ""}
-                      </div>
-                    </div>
+                    <button
+                      className="wi-remove"
+                      onClick={e => { e.stopPropagation(); removeFromWatchlist(ticker); }}
+                      title="Hapus dari watchlist">
+                      ✕
+                    </button>
                   </div>
                 );
               })}
@@ -490,6 +519,19 @@ export default function IDXTerminal() {
                         onClick={() => setPeriod(p)}>{p}</button>
                     ))}
                   </div>
+                  <button
+                    onClick={toggleSelectedWatchlist}
+                    title={watchlist.includes(selectedTicker) ? "Hapus dari watchlist" : "Tambah ke watchlist"}
+                    style={{
+                      padding: "3px 10px", fontSize: 12, lineHeight: 1, marginLeft: 6,
+                      border: `1px solid ${watchlist.includes(selectedTicker) ? "#f59e0b" : "#0f2040"}`,
+                      borderRadius: 3,
+                      background: watchlist.includes(selectedTicker) ? "rgba(245,158,11,0.15)" : "transparent",
+                      color: watchlist.includes(selectedTicker) ? "#f59e0b" : "#4a6080",
+                      cursor: "pointer",
+                    }}>
+                    {watchlist.includes(selectedTicker) ? "★" : "☆"}
+                  </button>
                 </div>
 
                 <div className="chart-box">
@@ -498,7 +540,9 @@ export default function IDXTerminal() {
                       ticker={selectedTicker}
                       period={PERIOD_MAP[period].period}
                       interval="1d"
-                      height={340}
+                      height={300}
+                      inWatchlist={watchlist.includes(selectedTicker)}
+                      onWatchlistToggle={toggleSelectedWatchlist}
                     />
                   </div>
                   <div className="indicator-row">
