@@ -1,52 +1,57 @@
 """
 services/auth_service.py
 
-Autentikasi lokal: bcrypt password hashing + JWT access token.
-Single-user app — tidak ada role/permission system.
-
-Deps (tambah ke requirements.txt):
-  python-jose[cryptography]>=3.3
-  passlib[bcrypt]>=1.7
+Local auth with bcrypt password hashing and JWT access tokens.
 """
-import os
+
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User
 
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
-# SECRET_KEY dibaca dari env; fallback ke random bytes hanya untuk dev.
-# Production: set IDX_JWT_SECRET di environment.
+# Config
+# SECRET_KEY is read from env; the fallback is for local dev only.
 _SECRET_KEY: str = os.environ.get(
     "IDX_JWT_SECRET",
     "CHANGE_ME_in_production_use_32_random_bytes",
 )
-_ALGORITHM        = "HS256"
-_ACCESS_TOKEN_TTL = 60 * 24 * 7  # 7 hari (dalam menit)
+_ALGORITHM = "HS256"
+_ACCESS_TOKEN_TTL = 60 * 24 * 7  # 7 days in minutes
+_BCRYPT_MAX_BYTES = 72
 
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _hash_password(plain: str) -> str:
-    return _pwd_ctx.hash(plain)
+    plain_bytes = plain.encode("utf-8")
+    if len(plain_bytes) > _BCRYPT_MAX_BYTES:
+        raise ValueError(
+            f"Password terlalu panjang. Maksimal {_BCRYPT_MAX_BYTES} byte."
+        )
+    return bcrypt.hashpw(plain_bytes, bcrypt.gensalt()).decode("utf-8")
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_ctx.verify(plain, hashed)
+    try:
+        plain_bytes = plain.encode("utf-8")
+        if len(plain_bytes) > _BCRYPT_MAX_BYTES:
+            return False
+        return bcrypt.checkpw(plain_bytes, hashed.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def create_access_token(user_id: str, username: str) -> str:
-    """Buat JWT access token dengan expiry."""
+    """Create a JWT access token with expiry."""
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
@@ -58,17 +63,11 @@ def create_access_token(user_id: str, username: str) -> str:
 
 
 def decode_access_token(token: str) -> dict:
-    """
-    Decode dan verifikasi JWT.
-    Raise JWTError jika invalid atau expired.
-    """
+    """Decode and verify a JWT, raising JWTError when invalid."""
     return jwt.decode(token, _SECRET_KEY, algorithms=[_ALGORITHM])
 
 
-# ── AuthService ───────────────────────────────────────────────────────────────
-
 class AuthService:
-
     @staticmethod
     async def register(
         db: AsyncSession,
@@ -77,34 +76,49 @@ class AuthService:
         password: str,
     ) -> tuple[bool, str]:
         """
-        Daftarkan user baru.
-        Return (True, "") jika berhasil, (False, pesan_error) jika gagal.
+        Register a new user.
+        Returns (True, "") on success, or (False, error_message) on failure.
         """
         username = username.strip()
-        email    = email.strip().lower()
+        email = email.strip().lower()
 
         if len(username) < 3:
             return False, "Username minimal 3 karakter."
         if len(password) < 8:
             return False, "Password minimal 8 karakter."
 
-        # Cek duplikat username
         dup_u = await db.execute(select(User).where(User.username == username))
         if dup_u.scalar_one_or_none():
             return False, f"Username '{username}' sudah dipakai."
 
-        # Cek duplikat email
         dup_e = await db.execute(select(User).where(User.email == email))
         if dup_e.scalar_one_or_none():
             return False, "Email sudah terdaftar."
 
-        user = User(
-            username=username,
-            email=email,
-            hashed_pw=_hash_password(password),
-        )
+        try:
+            hashed_pw = _hash_password(password)
+        except ValueError as exc:
+            return False, str(exc)
+
+        user = User(username=username, email=email, hashed_pw=hashed_pw)
         db.add(user)
-        await db.commit()
+
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            return False, "Username atau email sudah terdaftar."
+        except OperationalError as exc:
+            await db.rollback()
+            logger.exception("Failed to register user")
+            if "readonly" in str(exc).lower():
+                return False, "Database tidak bisa ditulis. Periksa izin folder data aplikasi."
+            return False, "Registrasi gagal karena database sedang bermasalah."
+        except Exception:
+            await db.rollback()
+            logger.exception("Failed to register user")
+            return False, "Registrasi gagal. Coba lagi beberapa saat lagi."
+
         logger.info("User registered: %s", username)
         return True, ""
 
@@ -115,14 +129,13 @@ class AuthService:
         password: str,
     ) -> tuple[Optional[str], str]:
         """
-        Login dengan username + password.
-        Return (token, "") jika berhasil, (None, pesan_error) jika gagal.
+        Login with username + password.
+        Returns (token, "") on success, or (None, error_message) on failure.
         """
         result = await db.execute(select(User).where(User.username == username.strip()))
         user = result.scalar_one_or_none()
 
         if user is None or not _verify_password(password, user.hashed_pw):
-            # Pesan yang sama untuk keduanya — hindari username enumeration
             return None, "Username atau password salah."
 
         token = create_access_token(user.id, user.username)
@@ -135,8 +148,8 @@ class AuthService:
         token: str,
     ) -> Optional[User]:
         """
-        Verifikasi JWT dan kembalikan User ORM object.
-        Return None jika token invalid/expired.
+        Verify a JWT and return the ORM user object.
+        Returns None if the token is invalid or expired.
         """
         try:
             payload = decode_access_token(token)

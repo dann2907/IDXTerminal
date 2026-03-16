@@ -1,7 +1,6 @@
 """
-─────────────────────────────────────────────────────────────────────────────
 CHECKER  (backend/services/alert_checker.py)
-─────────────────────────────────────────────────────────────────────────────
+
 Dipanggil dari _patch_broadcaster_with_order_check() di main.py,
 bersama OrderChecker — ikut ritme DataFetcher setiap ~15 detik.
 """
