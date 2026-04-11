@@ -112,6 +112,57 @@ class PortfolioServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fake_broadcaster.messages), 1)
         self.assertEqual(fake_broadcaster.messages[0]["type"], "order_triggered")
 
+    async def test_watchlist_supports_multiple_categories_for_same_ticker(self) -> None:
+        async with self.SessionLocal() as db:
+            default_category = await PortfolioService.ensure_default_watchlist_category(db)
+            ok, _, category = await PortfolioService.create_watchlist_category(db, "Saham Gold")
+            self.assertTrue(ok)
+            assert category is not None
+
+            ok, _ = await PortfolioService.watchlist_add(db, "ANTM.JK", default_category.id)
+            self.assertTrue(ok)
+            ok, _ = await PortfolioService.watchlist_add(db, "ANTM.JK", category["id"])
+            self.assertTrue(ok)
+
+            grouped = await PortfolioService.get_watchlist_categories(db)
+            antr = {
+                item["ticker"]
+                for group in grouped
+                if group["name"] in {"Watchlist Utama", "Saham Gold"}
+                for item in group["tickers"]
+            }
+            self.assertEqual(antr, {"ANTM.JK"})
+
+            tickers = await PortfolioService.get_watchlist_tickers(db)
+            self.assertEqual(tickers, ["ANTM.JK"])
+
+    async def test_watchlist_remove_only_affects_selected_category(self) -> None:
+        async with self.SessionLocal() as db:
+            default_category = await PortfolioService.ensure_default_watchlist_category(db)
+            ok, _, category = await PortfolioService.create_watchlist_category(db, "Dividend")
+            self.assertTrue(ok)
+            assert category is not None
+
+            await PortfolioService.watchlist_add(db, "BBCA.JK", default_category.id)
+            await PortfolioService.watchlist_add(db, "BBCA.JK", category["id"])
+
+            ok, _ = await PortfolioService.watchlist_remove(db, "BBCA.JK", category["id"])
+            self.assertTrue(ok)
+
+            grouped = await PortfolioService.get_watchlist_categories(db)
+            default_items = next(
+                group["tickers"]
+                for group in grouped
+                if group["id"] == default_category.id
+            )
+            dividend_items = next(
+                group["tickers"]
+                for group in grouped
+                if group["id"] == category["id"]
+            )
+            self.assertEqual([item["ticker"] for item in default_items], ["BBCA.JK"])
+            self.assertEqual(dividend_items, [])
+
 
 if __name__ == "__main__":
     unittest.main()

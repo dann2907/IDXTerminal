@@ -15,15 +15,22 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import delete, exists, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from db.database import AsyncSessionLocal
-from models.portfolio import Holding, Order, PortfolioMeta, TradeHistory, Watchlist
+from models.portfolio import (
+    Holding,
+    Order,
+    PortfolioMeta,
+    TradeHistory,
+    Watchlist,
+    WatchlistCategory,
+)
 
 LOT_SIZE = 100
 IDX_SUFFIX = ".JK"
+DEFAULT_WATCHLIST_NAME = "Watchlist Utama"
 
 
 def _is_idx(ticker: str) -> bool:
@@ -100,6 +107,45 @@ class PortfolioService:
             await db.refresh(meta)
             return meta
         return result
+
+    @staticmethod
+    async def ensure_default_watchlist_category(
+        db: AsyncSession,
+    ) -> WatchlistCategory:
+        """
+        Pastikan selalu ada 1 kategori watchlist default.
+        Dipakai untuk kompatibilitas flow lama yang tidak mengirim category_id.
+        """
+        result = await db.execute(
+            select(WatchlistCategory)
+            .where(WatchlistCategory.is_default.is_(True))
+            .order_by(WatchlistCategory.display_order, WatchlistCategory.id)
+        )
+        category = result.scalars().first()
+        if category is not None:
+            return category
+
+        fallback = await db.execute(
+            select(WatchlistCategory)
+            .order_by(WatchlistCategory.display_order, WatchlistCategory.id)
+        )
+        category = fallback.scalars().first()
+        if category is not None:
+            category.is_default = True
+            await db.commit()
+            await db.refresh(category)
+            return category
+
+        category = WatchlistCategory(
+            name=DEFAULT_WATCHLIST_NAME,
+            display_order=0,
+            is_default=True,
+            created_at=datetime.utcnow(),
+        )
+        db.add(category)
+        await db.commit()
+        await db.refresh(category)
+        return category
 
     # ── Summary ───────────────────────────────────────────────────────────────
 
@@ -626,39 +672,161 @@ class PortfolioService:
     # ── Watchlist ─────────────────────────────────────────────────────────────
 
     @staticmethod
-    async def watchlist_add(db: AsyncSession, ticker: str) -> tuple[bool, str]:
-        ticker = ticker.upper().strip()
+    async def create_watchlist_category(
+        db: AsyncSession,
+        name: str,
+    ) -> tuple[bool, str, Optional[dict]]:
+        normalized_name = " ".join(name.strip().split())
+        if not normalized_name:
+            return False, "Nama watchlist tidak boleh kosong", None
+
         existing = await db.execute(
-            select(Watchlist).where(Watchlist.ticker == ticker)
+            select(WatchlistCategory).where(
+                func.lower(WatchlistCategory.name) == normalized_name.lower()
+            )
         )
         if existing.scalar_one_or_none():
-            return False, f"{ticker} sudah ada di watchlist"
-        # display_order = max + 1 agar selalu di bawah
-        max_result = await db.execute(select(Watchlist))
-        count = len(max_result.scalars().all())
-        db.add(Watchlist(ticker=ticker, display_order=count))
+            return False, f'Watchlist "{normalized_name}" sudah ada', None
+
+        count_result = await db.execute(select(WatchlistCategory))
+        display_order = len(count_result.scalars().all())
+        category = WatchlistCategory(
+            name=normalized_name,
+            display_order=display_order,
+            is_default=False,
+            created_at=datetime.utcnow(),
+        )
+        db.add(category)
         await db.commit()
-        return True, f"{ticker} ditambahkan ke watchlist"
+        await db.refresh(category)
+        return True, f'Watchlist "{normalized_name}" dibuat', {
+            "id": category.id,
+            "name": category.name,
+            "is_default": category.is_default,
+            "tickers": [],
+        }
 
     @staticmethod
-    async def watchlist_remove(db: AsyncSession, ticker: str) -> tuple[bool, str]:
+    async def watchlist_add(
+        db: AsyncSession,
+        ticker: str,
+        category_id: Optional[int] = None,
+    ) -> tuple[bool, str]:
         ticker = ticker.upper().strip()
-        result = await db.execute(
-            select(Watchlist).where(Watchlist.ticker == ticker)
+        if category_id is None:
+            category = await PortfolioService.ensure_default_watchlist_category(db)
+        else:
+            category = await db.get(WatchlistCategory, category_id)
+            if category is None:
+                return False, "Kategori watchlist tidak ditemukan"
+
+        existing = await db.execute(
+            select(Watchlist).where(
+                Watchlist.category_id == category.id,
+                Watchlist.ticker == ticker,
+            )
         )
-        row = result.scalar_one_or_none()
-        if row is None:
-            return False, f"{ticker} tidak ada di watchlist"
-        await db.delete(row)
+        if existing.scalar_one_or_none():
+            return False, f"{ticker} sudah ada di {category.name}"
+
+        count_result = await db.execute(
+            select(Watchlist).where(Watchlist.category_id == category.id)
+        )
+        display_order = len(count_result.scalars().all())
+        db.add(
+            Watchlist(
+                ticker=ticker,
+                category_id=category.id,
+                display_order=display_order,
+            )
+        )
         await db.commit()
-        return True, f"{ticker} dihapus dari watchlist"
+        return True, f"{ticker} ditambahkan ke {category.name}"
 
     @staticmethod
-    async def get_watchlist(db: AsyncSession) -> list[str]:
-        result = await db.execute(
-            select(Watchlist).order_by(Watchlist.display_order, Watchlist.ticker)
+    async def watchlist_remove(
+        db: AsyncSession,
+        ticker: str,
+        category_id: Optional[int] = None,
+    ) -> tuple[bool, str]:
+        ticker = ticker.upper().strip()
+
+        q = select(Watchlist).where(Watchlist.ticker == ticker)
+        category_name = "watchlist"
+        if category_id is not None:
+            q = q.where(Watchlist.category_id == category_id)
+            category = await db.get(WatchlistCategory, category_id)
+            if category is None:
+                return False, "Kategori watchlist tidak ditemukan"
+            category_name = category.name
+
+        result = await db.execute(q.order_by(Watchlist.display_order, Watchlist.id))
+        rows = result.scalars().all()
+        if not rows:
+            if category_id is not None:
+                return False, f"{ticker} tidak ada di {category_name}"
+            return False, f"{ticker} tidak ada di watchlist"
+
+        for row in rows:
+            await db.delete(row)
+        await db.commit()
+        if category_id is not None:
+            return True, f"{ticker} dihapus dari {category_name}"
+        return True, f"{ticker} dihapus dari semua watchlist"
+
+    @staticmethod
+    async def get_watchlist_categories(
+        db: AsyncSession,
+        prices: Optional[dict[str, float]] = None,
+    ) -> list[dict]:
+        await PortfolioService.ensure_default_watchlist_category(db)
+        cat_result = await db.execute(
+            select(WatchlistCategory).order_by(
+                WatchlistCategory.display_order,
+                WatchlistCategory.created_at,
+                WatchlistCategory.id,
+            )
         )
-        return [w.ticker for w in result.scalars().all()]
+        categories = cat_result.scalars().all()
+
+        item_result = await db.execute(
+            select(Watchlist).order_by(
+                Watchlist.category_id,
+                Watchlist.display_order,
+                Watchlist.added_at,
+                Watchlist.id,
+            )
+        )
+        items = item_result.scalars().all()
+        items_by_category: dict[int, list[dict]] = {
+            category.id: [] for category in categories
+        }
+        for item in items:
+            items_by_category.setdefault(item.category_id, []).append({
+                "ticker": item.ticker,
+                "price": prices.get(item.ticker) if prices else None,
+            })
+
+        return [
+            {
+                "id": category.id,
+                "name": category.name,
+                "is_default": category.is_default,
+                "tickers": items_by_category.get(category.id, []),
+            }
+            for category in categories
+        ]
+
+    @staticmethod
+    async def get_watchlist_tickers(db: AsyncSession) -> list[str]:
+        result = await db.execute(
+            select(Watchlist.ticker).order_by(
+                Watchlist.display_order,
+                Watchlist.added_at,
+                Watchlist.ticker,
+            )
+        )
+        return list(dict.fromkeys(result.scalars().all()))
 
     # ── Performance metrics ───────────────────────────────────────────────────
 

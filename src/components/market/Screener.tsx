@@ -41,6 +41,7 @@ interface Filters {
 
 interface Props {
   onSelectTicker: (ticker: string) => void;
+  activeWatchlistCategoryId?: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -77,10 +78,10 @@ function parseNum(s: string): number | null {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function Screener({ onSelectTicker }: Props) {
+export default function Screener({ onSelectTicker, activeWatchlistCategoryId }: Props) {
   const quotes         = useMarketStore(s => s.quotes);
   const addToWatchlist = usePortfolioStore(s => s.addToWatchlist);
-  const watchlist      = usePortfolioStore(s => s.watchlist);
+  const watchlistCategories = usePortfolioStore(s => s.watchlistCategories);
 
   const [sort, setSort]       = useState<{ key: SortKey; dir: Direction }>({ key: "volume", dir: "desc" });
   const [page, setPage]       = useState(0);
@@ -145,8 +146,15 @@ export default function Screener({ onSelectTicker }: Props) {
 
   const handleWatchlist = useCallback(async (e: React.MouseEvent, ticker: string) => {
     e.stopPropagation();
-    await addToWatchlist(ticker);
-  }, [addToWatchlist]);
+    await addToWatchlist(ticker, activeWatchlistCategoryId);
+  }, [activeWatchlistCategoryId, addToWatchlist]);
+
+  const activeWatchlistTickers = useMemo(() => {
+    const activeCategory = watchlistCategories.find(
+      category => category.id === activeWatchlistCategoryId,
+    ) ?? watchlistCategories[0];
+    return new Set(activeCategory?.tickers.map(item => item.ticker) ?? []);
+  }, [activeWatchlistCategoryId, watchlistCategories]);
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
@@ -271,7 +279,7 @@ export default function Screener({ onSelectTicker }: Props) {
           <tbody>
             {rows.map(q => {
               const sym  = q.ticker.replace(".JK", "");
-              const inWl = watchlist.includes(q.ticker);
+              const inWl = activeWatchlistTickers.has(q.ticker);
               return (
                 <tr key={q.ticker}
                   onClick={() => onSelectTicker(q.ticker)}
@@ -332,7 +340,7 @@ export default function Screener({ onSelectTicker }: Props) {
                   <td style={{ padding: "5px 10px", textAlign: "center" }}>
                     <button
                       onClick={e => handleWatchlist(e, q.ticker)}
-                      title={inWl ? "Sudah di watchlist" : "Tambah ke watchlist"}
+                      title={inWl ? "Sudah ada di watchlist aktif" : "Tambah ke watchlist aktif"}
                       style={{
                         padding: "2px 6px", fontSize: 8,
                         background: inWl ? "rgba(46,143,223,0.15)" : "transparent",

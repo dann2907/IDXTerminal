@@ -60,6 +60,22 @@ export interface PortfolioSummary {
   realized_pnl: number;
 }
 
+export interface WatchlistTicker {
+  ticker: string;
+  price: number | null;
+}
+
+export interface WatchlistCategory {
+  id: number;
+  name: string;
+  is_default: boolean;
+  tickers: WatchlistTicker[];
+}
+
+interface WatchlistResponse {
+  categories: WatchlistCategory[];
+}
+
 // Notifikasi order yang terpicu — dikirim dari backend via WS
 export interface OrderTriggeredEvent {
   order_id: string;
@@ -81,6 +97,7 @@ interface PortfolioState {
   history: TradeRecord[];
   orders: PortfolioOrder[];
   watchlist: string[];
+  watchlistCategories: WatchlistCategory[];
   performance: Record<string, unknown> | null;
 
   // Order triggered notification — frontend tampilkan dialog konfirmasi
@@ -122,8 +139,13 @@ interface PortfolioState {
   dismissOrder: (orderId: string) => Promise<{ ok: boolean; message: string }>;
   clearPendingOrderEvent: () => void;
 
-  addToWatchlist: (ticker: string) => Promise<{ ok: boolean; message: string }>;
-  removeFromWatchlist: (ticker: string) => Promise<{ ok: boolean; message: string }>;
+  addToWatchlist: (ticker: string, categoryId?: number) => Promise<{ ok: boolean; message: string }>;
+  removeFromWatchlist: (ticker: string, categoryId?: number) => Promise<{ ok: boolean; message: string }>;
+  createWatchlistCategory: (name: string) => Promise<{
+    ok: boolean;
+    message: string;
+    category?: WatchlistCategory;
+  }>;
 
   // ── WS handler (dipanggil oleh useMarketStore) ───────────────────────────
   handleWsMessage: (msg: { type: string; data: unknown }) => void;
@@ -157,6 +179,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   history: [],
   orders: [],
   watchlist: [],
+  watchlistCategories: [],
   performance: null,
   pendingOrderEvent: null,
   loading: { summary: false, holdings: false, history: false, orders: false },
@@ -215,8 +238,14 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
   async fetchWatchlist() {
     try {
-      const data = await apiFetch<{ ticker: string }[]>("/watchlist");
-      set({ watchlist: data.map(d => d.ticker) });
+      const data = await apiFetch<WatchlistResponse>("/watchlist");
+      const categories = data.categories ?? [];
+      const tickers = Array.from(
+        new Set(
+          categories.flatMap(category => category.tickers.map(item => item.ticker)),
+        ),
+      );
+      set({ watchlist: tickers, watchlistCategories: categories });
     } catch (e) {
       console.error("[portfolio] fetchWatchlist:", e);
     }
@@ -337,11 +366,11 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
   // ── Watchlist ──────────────────────────────────────────────────────────────
 
-  async addToWatchlist(ticker) {
+  async addToWatchlist(ticker, categoryId) {
     try {
       const res = await apiFetch<{ ok: boolean; message: string }>("/watchlist", {
         method: "POST",
-        body: JSON.stringify({ ticker }),
+        body: JSON.stringify({ ticker, category_id: categoryId }),
       });
       await get().fetchWatchlist();
       return res;
@@ -350,12 +379,30 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     }
   },
 
-  async removeFromWatchlist(ticker) {
+  async removeFromWatchlist(ticker, categoryId) {
     try {
+      const q = categoryId ? `?category_id=${categoryId}` : "";
       const res = await apiFetch<{ ok: boolean; message: string }>(
-        `/watchlist/${ticker}`,
+        `/watchlist/${ticker}${q}`,
         { method: "DELETE" },
       );
+      await get().fetchWatchlist();
+      return res;
+    } catch (e) {
+      return { ok: false, message: (e as Error).message };
+    }
+  },
+
+  async createWatchlistCategory(name) {
+    try {
+      const res = await apiFetch<{
+        ok: boolean;
+        message: string;
+        category: WatchlistCategory;
+      }>("/watchlist/categories", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
       await get().fetchWatchlist();
       return res;
     } catch (e) {

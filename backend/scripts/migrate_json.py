@@ -30,7 +30,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.database import AsyncSessionLocal, engine
-from models.portfolio import Base, Holding, Order, PortfolioMeta, TradeHistory, Watchlist
+from models.portfolio import Base, Holding, Order, PortfolioMeta, TradeHistory, Watchlist, WatchlistCategory
 
 # ── Lokasi default portfolio_data.json ───────────────────────────────────────
 DEFAULT_JSON = os.path.join(
@@ -271,9 +271,17 @@ async def migrate(data: dict, force: bool = False) -> None:
 
         # ── watchlist ──────────────────────────────────────────────────────
         watchlist_raw: list = data.get("watchlist", [])
+        default_category = WatchlistCategory(
+            name="Watchlist Utama",
+            display_order=0,
+            is_default=True,
+        )
+        db.add(default_category)
+        await db.flush()
         for i, ticker in enumerate(watchlist_raw):
             db.add(Watchlist(
                 ticker=ticker.upper(),
+                category_id=default_category.id,
                 display_order=i,
             ))
         print(f"[watchlist] {len(watchlist_raw)} ticker dimigrate")

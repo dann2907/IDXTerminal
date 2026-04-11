@@ -107,6 +107,7 @@ class OrderRequest(BaseModel):
 
 class WatchlistRequest(BaseModel):
     ticker: str
+    category_id: Optional[int] = Field(None, gt=0)
 
     @field_validator("ticker")
     @classmethod
@@ -115,6 +116,15 @@ class WatchlistRequest(BaseModel):
         if not v.endswith(".JK"):
             v += ".JK"
         return v
+
+
+class WatchlistCategoryCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=40)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str) -> str:
+        return " ".join(v.strip().split())
 
 
 class ConfirmOrderRequest(BaseModel):
@@ -256,51 +266,62 @@ async def cancel_order(order_id: str) -> JSONResponse:
 
 @router.get("/watchlist")
 async def get_watchlist() -> JSONResponse:
-    """Daftar ticker di watchlist beserta harga terkini dari cache."""
-    # Import lazy untuk hindari circular
-    from db.database import AsyncSessionLocal  # noqa: PLC0415
-    from services.portfolio_service import PortfolioService  # noqa: PLC0415
- 
+    """Semua kategori watchlist beserta ticker dan harga terkini."""
     prices = _current_prices()
     async with AsyncSessionLocal() as db:
-        tickers = await PortfolioService.get_watchlist(db)
- 
-    result = []
-    for ticker in tickers:
-        # FIX: prices berisi float langsung (dari _current_prices()),
-        # bukan dict. Sebelumnya: isinstance(quote, (int,float)) selalu False
-        # karena quote = prices.get(ticker, {}) = {} (dict), bukan float.
-        price: Optional[float] = prices.get(ticker)  # float atau None
-        result.append({
-            "ticker": ticker,
-            "price": price,
-        })
-    return JSONResponse(result)
+        categories = await PortfolioService.get_watchlist_categories(db, prices)
+    return JSONResponse({"categories": categories})
+
+
+@router.post("/watchlist/categories")
+async def create_watchlist_category(
+    req: WatchlistCategoryCreateRequest,
+) -> JSONResponse:
+    """Buat kategori watchlist baru milik user."""
+    async with AsyncSessionLocal() as db:
+        ok, msg, category = await PortfolioService.create_watchlist_category(
+            db,
+            req.name,
+        )
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return JSONResponse({"ok": True, "message": msg, "category": category})
 
 
 @router.post("/watchlist")
 async def add_to_watchlist(req: WatchlistRequest) -> JSONResponse:
-    """Tambah ticker ke watchlist dan daftarkan ke TickerRegistry."""
+    """Tambah ticker ke kategori watchlist user."""
     async with AsyncSessionLocal() as db:
-        ok, msg = await PortfolioService.watchlist_add(db, req.ticker)
+        ok, msg = await PortfolioService.watchlist_add(
+            db,
+            req.ticker,
+            category_id=req.category_id,
+        )
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
-    # Promosikan ticker ke tier watchlist di registry
-    await _promote_to_watchlist(req.ticker)
+    await _sync_watchlist_registry()
     return JSONResponse({"ok": True, "message": msg})
 
 
 @router.delete("/watchlist/{ticker}")
-async def remove_from_watchlist(ticker: str) -> JSONResponse:
-    """Hapus ticker dari watchlist."""
+async def remove_from_watchlist(
+    ticker: str,
+    category_id: Optional[int] = Query(None, gt=0),
+) -> JSONResponse:
+    """Hapus ticker dari satu kategori watchlist atau seluruh kategori."""
     ticker = ticker.upper().strip()
     if not ticker.endswith(".JK"):
         ticker += ".JK"
     async with AsyncSessionLocal() as db:
-        ok, msg = await PortfolioService.watchlist_remove(db, ticker)
+        ok, msg = await PortfolioService.watchlist_remove(
+            db,
+            ticker,
+            category_id=category_id,
+        )
     if not ok:
         raise HTTPException(status_code=404, detail=msg)
+    await _sync_watchlist_registry()
     return JSONResponse({"ok": True, "message": msg})
 
 
@@ -320,9 +341,11 @@ async def _sync_registry_after_trade() -> None:
     await _registry.sync_holdings(tickers)
 
 
-async def _promote_to_watchlist(ticker: str) -> None:
-    """Promosikan ticker dari search_temp ke tier watchlist di TickerRegistry."""
+async def _sync_watchlist_registry() -> None:
+    """Sinkronkan seluruh ticker watchlist ke TickerRegistry."""
     from routers.market import _registry  # noqa: PLC0415
     if _registry is None:
         return
-    await _registry.promote(ticker, to="watchlist")
+    async with AsyncSessionLocal() as db:
+        tickers = await PortfolioService.get_watchlist_tickers(db)
+    await _registry.sync_watchlist(tickers)

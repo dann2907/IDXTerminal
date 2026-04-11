@@ -96,7 +96,7 @@ const CSS = `
  
   /* ── Left Sidebar ── */
   .sidebar {
-    width: 210px; flex-shrink: 0;
+    width: 248px; flex-shrink: 0;
     background: #070d1c;
     border-right: 1px solid #0f2040;
     display: flex; flex-direction: column;
@@ -109,7 +109,61 @@ const CSS = `
     text-transform: uppercase; padding: 0 12px 7px;
     font-family: 'Syne', sans-serif; font-weight: 700;
   }
- 
+  .watchlist-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 0 12px 8px;
+  }
+  .watchlist-caption {
+    font-size: 9px; color: #2a4060; letter-spacing: 1px;
+    font-family: 'Syne', sans-serif;
+  }
+  .watchlist-chip-row {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 0 12px 10px;
+  }
+  .watchlist-chip {
+    padding: 4px 8px; border-radius: 999px; cursor: pointer;
+    border: 1px solid #0f2040; background: transparent; color: #4a6080;
+    font-size: 10px; font-family: 'Syne', sans-serif; transition: all 0.12s;
+  }
+  .watchlist-chip:hover { border-color: #1e3a5f; color: #8aa8cc; }
+  .watchlist-chip.active { background: #0a1e38; border-color: #2e8fdf55; color: #2e8fdf; }
+  .watchlist-form {
+    display: flex; gap: 6px; padding: 0 12px 10px;
+  }
+  .watchlist-input {
+    flex: 1;
+    background: #040d1a; border: 1px solid #0f2040; border-radius: 4px;
+    color: #c8d8f0; font-family: 'Space Mono', monospace; font-size: 10px;
+    padding: 6px 8px; outline: none;
+  }
+  .watchlist-input:focus { border-color: #2e8fdf55; }
+  .watchlist-btn {
+    padding: 6px 9px; border-radius: 4px; cursor: pointer;
+    border: 1px solid #0f2040; background: #0a1628; color: #8aa8cc;
+    font-size: 10px; font-family: 'Syne', sans-serif; transition: all 0.12s;
+  }
+  .watchlist-btn:hover { border-color: #1e3a5f; color: #c8d8f0; }
+  .watchlist-btn.primary {
+    background: rgba(46,143,223,0.14);
+    border-color: rgba(46,143,223,0.32);
+    color: #2e8fdf;
+  }
+  .watchlist-btn.primary:hover {
+    background: rgba(46,143,223,0.2);
+    border-color: rgba(46,143,223,0.45);
+  }
+  .watchlist-note {
+    padding: 0 12px 10px; font-size: 10px; line-height: 1.5;
+  }
+  .watchlist-note.ok { color: #00d68f; }
+  .watchlist-note.err { color: #ff4560; }
+  .watchlist-active-label {
+    padding: 0 12px 6px;
+    font-size: 9px; color: #2a4060; letter-spacing: 1px;
+    font-family: 'Syne', sans-serif; text-transform: uppercase;
+  }
+
   .watchlist-item {
     display: flex; align-items: center; justify-content: space-between;
     padding: 7px 12px; cursor: pointer;
@@ -316,11 +370,13 @@ export default function IDXTerminal() {
 
   const summary   = usePortfolioStore(s => s.summary);
   const holdings  = usePortfolioStore(s => s.holdings);
-  const watchlist           = usePortfolioStore(s => s.watchlist);
-  const addToWatchlist      = usePortfolioStore(s => s.addToWatchlist);
+  const watchlist = usePortfolioStore(s => s.watchlist);
+  const watchlistCategories = usePortfolioStore(s => s.watchlistCategories);
+  const addToWatchlist = usePortfolioStore(s => s.addToWatchlist);
   const removeFromWatchlist = usePortfolioStore(s => s.removeFromWatchlist);
-  const buy                 = usePortfolioStore(s => s.buy);
-  const sell                = usePortfolioStore(s => s.sell);
+  const createWatchlistCategory = usePortfolioStore(s => s.createWatchlistCategory);
+  const buy = usePortfolioStore(s => s.buy);
+  const sell = usePortfolioStore(s => s.sell);
 
   // ── Local state ───────────────────────────────────────────────────────
   const [page, setPage]           = useState("CHART");
@@ -333,6 +389,10 @@ export default function IDXTerminal() {
   const [tradeLots, setTradeLots] = useState("");
   const [tradeMsg, setTradeMsg]   = useState(null);
   const [portfolioTab, setPortfolioTab] = useState("holdings"); // holdings|orders|history|performance
+  const [activeWatchlistCategoryId, setActiveWatchlistCategoryId] = useState(null);
+  const [newWatchlistName, setNewWatchlistName] = useState("");
+  const [watchlistTickerInput, setWatchlistTickerInput] = useState("");
+  const [watchlistMsg, setWatchlistMsg] = useState(null);
 
   // Handler dari SearchBar
   const handleSearchSelect = useCallback((ticker) => {
@@ -340,16 +400,54 @@ export default function IDXTerminal() {
     setPage("CHART");
   }, []);
 
+  const activeWatchlistCategory = watchlistCategories.find(
+    category => category.id === activeWatchlistCategoryId,
+  ) || watchlistCategories[0] || null;
+  const activeWatchlistTickers = activeWatchlistCategory
+    ? activeWatchlistCategory.tickers.map(item => item.ticker)
+    : [];
+  const selectedTickerInActiveWatchlist = activeWatchlistTickers.includes(selectedTicker);
+
   const toggleSelectedWatchlist = useCallback(async () => {
-    if (watchlist.includes(selectedTicker)) {
-      await removeFromWatchlist(selectedTicker);
+    if (!activeWatchlistCategory) return;
+    if (selectedTickerInActiveWatchlist) {
+      const res = await removeFromWatchlist(selectedTicker, activeWatchlistCategory.id);
+      setWatchlistMsg(res);
       return;
     }
-    await addToWatchlist(selectedTicker);
-  }, [addToWatchlist, removeFromWatchlist, selectedTicker, watchlist]);
+    const res = await addToWatchlist(selectedTicker, activeWatchlistCategory.id);
+    setWatchlistMsg(res);
+  }, [
+    activeWatchlistCategory,
+    addToWatchlist,
+    removeFromWatchlist,
+    selectedTicker,
+    selectedTickerInActiveWatchlist,
+  ]);
+
+  const handleCreateWatchlist = useCallback(async () => {
+    const name = newWatchlistName.trim();
+    if (!name) return;
+    const res = await createWatchlistCategory(name);
+    setWatchlistMsg(res);
+    if (res.ok && res.category) {
+      setActiveWatchlistCategoryId(res.category.id);
+      setNewWatchlistName("");
+    }
+  }, [createWatchlistCategory, newWatchlistName]);
+
+  const handleManualWatchlistAdd = useCallback(async () => {
+    if (!activeWatchlistCategory) return;
+    const ticker = watchlistTickerInput.trim();
+    if (!ticker) return;
+    const res = await addToWatchlist(ticker, activeWatchlistCategory.id);
+    setWatchlistMsg(res);
+    if (res.ok) setWatchlistTickerInput("");
+  }, [activeWatchlistCategory, addToWatchlist, watchlistTickerInput]);
 
   const prevQuotesRef = useRef({});
   const tradeMsgTimerRef = useRef(null);
+  const watchlistMsgTimerRef = useRef(null);
 
   // ── Clock ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -394,6 +492,16 @@ export default function IDXTerminal() {
     }
   }, [watchlist]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!watchlistCategories.length) {
+      setActiveWatchlistCategoryId(null);
+      return;
+    }
+    if (!watchlistCategories.some(category => category.id === activeWatchlistCategoryId)) {
+      setActiveWatchlistCategoryId(watchlistCategories[0].id);
+    }
+  }, [activeWatchlistCategoryId, watchlistCategories]);
+
   // Auto-clear success tradeMsg after 6s; errors persist until dismissed.
   useEffect(() => {
     if (tradeMsg?.ok) {
@@ -405,12 +513,19 @@ export default function IDXTerminal() {
     };
   }, [tradeMsg]);
 
+  useEffect(() => {
+    if (!watchlistMsg) return undefined;
+    if (watchlistMsgTimerRef.current) clearTimeout(watchlistMsgTimerRef.current);
+    watchlistMsgTimerRef.current = setTimeout(() => setWatchlistMsg(null), 4000);
+    return () => {
+      if (watchlistMsgTimerRef.current) clearTimeout(watchlistMsgTimerRef.current);
+    };
+  }, [watchlistMsg]);
+
   // ── Derived data ──────────────────────────────────────────────────────
   const selectedQuote = quotes[selectedTicker];
   const selectedCandles = candles[selectedTicker] || [];
-  const displayedWatchlist = watchlist.length
-    ? watchlist
-    : Object.keys(quotes).slice(0, 10);
+  const displayedWatchlist = activeWatchlistTickers;
 
   const gainers = topGainers(3);
   const losers  = topLosers(3);
@@ -479,6 +594,61 @@ export default function IDXTerminal() {
           <div className="sidebar">
             <div className="sidebar-section">
               <div className="sidebar-title">Watchlist</div>
+              <div className="watchlist-toolbar">
+                <div className="watchlist-caption">
+                  {watchlistCategories.length} kategori tersimpan
+                </div>
+                <button
+                  className="watchlist-btn"
+                  onClick={handleCreateWatchlist}
+                  title="Buat watchlist baru">
+                  + Simpan
+                </button>
+              </div>
+              <div className="watchlist-form">
+                <input
+                  className="watchlist-input"
+                  placeholder="Nama watchlist baru"
+                  value={newWatchlistName}
+                  onChange={e => setNewWatchlistName(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleCreateWatchlist()}
+                />
+              </div>
+              <div className="watchlist-chip-row">
+                {watchlistCategories.map(category => (
+                  <button
+                    key={category.id}
+                    className={`watchlist-chip${activeWatchlistCategory?.id === category.id ? " active" : ""}`}
+                    onClick={() => setActiveWatchlistCategoryId(category.id)}
+                    title={`Buka ${category.name}`}>
+                    {category.name} ({category.tickers.length})
+                  </button>
+                ))}
+              </div>
+              {watchlistMsg && (
+                <div className={`watchlist-note ${watchlistMsg.ok ? "ok" : "err"}`}>
+                  {watchlistMsg.message}
+                </div>
+              )}
+              <div className="watchlist-active-label">
+                {activeWatchlistCategory ? `Ticker di ${activeWatchlistCategory.name}` : "Belum ada kategori"}
+              </div>
+              <div className="watchlist-form">
+                <input
+                  className="watchlist-input"
+                  placeholder={activeWatchlistCategory ? "Tambah ticker manual, mis. ANTM" : "Buat kategori dulu"}
+                  value={watchlistTickerInput}
+                  onChange={e => setWatchlistTickerInput(e.target.value.toUpperCase())}
+                  onKeyDown={e => e.key === "Enter" && handleManualWatchlistAdd()}
+                  disabled={!activeWatchlistCategory}
+                />
+                <button
+                  className="watchlist-btn primary"
+                  onClick={handleManualWatchlistAdd}
+                  disabled={!activeWatchlistCategory}>
+                  + Ticker
+                </button>
+              </div>
               {displayedWatchlist.map(ticker => {
                 const q = quotes[ticker];
                 const fl = flashMap[ticker];
@@ -504,7 +674,12 @@ export default function IDXTerminal() {
                     </div>
                     <button
                       className="wi-remove"
-                      onClick={e => { e.stopPropagation(); removeFromWatchlist(ticker); }}
+                      onClick={async e => {
+                        e.stopPropagation();
+                        if (!activeWatchlistCategory) return;
+                        const res = await removeFromWatchlist(ticker, activeWatchlistCategory.id);
+                        setWatchlistMsg(res);
+                      }}
                       title="Hapus dari watchlist">
                       ✕
                     </button>
@@ -513,9 +688,17 @@ export default function IDXTerminal() {
               })}
               {!displayedWatchlist.length && (
                 <div style={{ padding: "12px", fontSize: 11, color: "#4a6080", lineHeight: 1.6 }}>
-                  <div style={{ marginBottom: 4 }}>Watchlist kosong</div>
+                  <div style={{ marginBottom: 4 }}>
+                    {activeWatchlistCategory ? "Belum ada ticker di kategori ini" : "Watchlist kosong"}
+                  </div>
                   <div style={{ fontSize: 10, color: "#2a4060" }}>
+                    {activeWatchlistCategory
+                      ? "Tambah manual di panel ini atau pakai tombol bintang dari chart/screener"
+                      : (
+                        <>
                     Gunakan 🔍 di atas untuk<br />cari & tambah saham
+                        </>
+                      )}
                   </div>
                 </div>
               )}
@@ -546,16 +729,18 @@ export default function IDXTerminal() {
                   </div>
                   <button
                     onClick={toggleSelectedWatchlist}
-                    title={watchlist.includes(selectedTicker) ? "Hapus dari watchlist" : "Tambah ke watchlist"}
+                    title={selectedTickerInActiveWatchlist
+                      ? `Hapus dari ${activeWatchlistCategory?.name ?? "watchlist"}`
+                      : `Tambah ke ${activeWatchlistCategory?.name ?? "watchlist"}`}
                     style={{
                       padding: "3px 10px", fontSize: 12, lineHeight: 1, marginLeft: 6,
-                      border: `1px solid ${watchlist.includes(selectedTicker) ? "#f59e0b" : "#0f2040"}`,
+                      border: `1px solid ${selectedTickerInActiveWatchlist ? "#f59e0b" : "#0f2040"}`,
                       borderRadius: 3,
-                      background: watchlist.includes(selectedTicker) ? "rgba(245,158,11,0.15)" : "transparent",
-                      color: watchlist.includes(selectedTicker) ? "#f59e0b" : "#4a6080",
+                      background: selectedTickerInActiveWatchlist ? "rgba(245,158,11,0.15)" : "transparent",
+                      color: selectedTickerInActiveWatchlist ? "#f59e0b" : "#4a6080",
                       cursor: "pointer",
                     }}>
-                    {watchlist.includes(selectedTicker) ? "★" : "☆"}
+                    {selectedTickerInActiveWatchlist ? "★" : "☆"}
                   </button>
                 </div>
 
@@ -566,7 +751,7 @@ export default function IDXTerminal() {
                       period={PERIOD_MAP[period].period}
                       interval="1d"
                       height={300}
-                      inWatchlist={watchlist.includes(selectedTicker)}
+                      inWatchlist={selectedTickerInActiveWatchlist}
                       onWatchlistToggle={toggleSelectedWatchlist}
                     />
                   </div>
@@ -782,6 +967,7 @@ export default function IDXTerminal() {
 {/* SCREENER */}
             {page === "SCREENER" && (
               <Screener
+                activeWatchlistCategoryId={activeWatchlistCategory?.id ?? undefined}
                 onSelectTicker={(ticker) => {
                   setSelectedTicker(ticker);
                   setPage("CHART");

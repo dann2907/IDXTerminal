@@ -17,9 +17,9 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float,
-    Integer, String, Text,
+    ForeignKey, Integer, String, Text, UniqueConstraint,
 )
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
@@ -96,14 +96,45 @@ class Order(Base):
     triggered_at  = Column(DateTime, nullable=True)
 
 
-class Watchlist(Base):
+class WatchlistCategory(Base):
     """
-    Daftar ticker yang dipantau user.
-    Satu baris per ticker, dengan urutan tampil (display_order).
+    Kategori watchlist buatan user.
+    Minimal selalu ada 1 kategori default agar flow lama tetap berjalan.
     """
-    __tablename__ = "watchlist"
+    __tablename__ = "watchlist_categories"
 
     id            = Column(Integer, primary_key=True, autoincrement=True)
-    ticker        = Column(String(16), nullable=False, unique=True, index=True)
+    name          = Column(String(64), nullable=False, unique=True, index=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    is_default    = Column(Boolean, nullable=False, default=False)
+    created_at    = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    items = relationship(
+        "Watchlist",
+        back_populates="category",
+        cascade="all, delete-orphan",
+    )
+
+
+class Watchlist(Base):
+    """
+    Daftar ticker yang dipantau user per kategori.
+    Satu ticker bisa ada di beberapa kategori berbeda.
+    """
+    __tablename__ = "watchlist"
+    __table_args__ = (
+        UniqueConstraint("category_id", "ticker", name="uq_watchlist_category_ticker"),
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    ticker        = Column(String(16), nullable=False, index=True)
+    category_id   = Column(
+        Integer,
+        ForeignKey("watchlist_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     display_order = Column(Integer, nullable=False, default=0)
     added_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    category = relationship("WatchlistCategory", back_populates="items")

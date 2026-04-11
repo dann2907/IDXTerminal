@@ -16,17 +16,20 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from db.database import AsyncSessionLocal, Base as DBBase, engine
-from models.portfolio import Base as PortfolioBase, Holding, Watchlist
+from models.portfolio import Base as PortfolioBase, Holding
 from routers import auth, market, portfolio
 from routers.alerts import router as alerts_router
 from routers.alerts import export_router
 from services.data_fetcher import DataFetcher
 from services.alert_checker import AlertChecker
 from services.order_checker import OrderChecker
-from services.portfolio_service import PortfolioService
+from services.portfolio_service import (
+    DEFAULT_WATCHLIST_NAME,
+    PortfolioService,
+)
 from services.ticker_registry import TickerRegistry
 from services.ws_broadcaster import WSBroadcaster
 
@@ -55,7 +58,96 @@ async def _init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(PortfolioBase.metadata.create_all)
         await conn.run_sync(DBBase.metadata.create_all)
+    await _migrate_watchlist_schema()
     logger.info("Database tables ready")
+
+
+async def _migrate_watchlist_schema() -> None:
+    """
+    Migrasi ringan untuk upgrade watchlist flat lama menjadi
+    watchlist berbasis kategori tanpa perlu Alembic.
+    """
+    async with engine.begin() as conn:
+        table_exists = await conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='watchlist'"
+        ))
+        if table_exists.scalar_one_or_none() is None:
+            return
+
+        columns_result = await conn.execute(text("PRAGMA table_info(watchlist)"))
+        columns = [row[1] for row in columns_result.fetchall()]
+        if "category_id" in columns:
+            return
+
+        logger.info("Migrating legacy watchlist schema to categorized watchlists")
+
+        default_result = await conn.execute(text(
+            "SELECT id FROM watchlist_categories WHERE is_default = 1 ORDER BY id LIMIT 1"
+        ))
+        default_category_id = default_result.scalar_one_or_none()
+        if default_category_id is None:
+            first_category_result = await conn.execute(text(
+                "SELECT id FROM watchlist_categories ORDER BY display_order, id LIMIT 1"
+            ))
+            default_category_id = first_category_result.scalar_one_or_none()
+
+        if default_category_id is None:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO watchlist_categories (name, display_order, is_default, created_at)
+                    VALUES (:name, 0, 1, CURRENT_TIMESTAMP)
+                    """
+                ),
+                {"name": DEFAULT_WATCHLIST_NAME},
+            )
+            created_result = await conn.execute(text(
+                "SELECT id FROM watchlist_categories WHERE name = :name LIMIT 1"
+            ), {"name": DEFAULT_WATCHLIST_NAME})
+            default_category_id = created_result.scalar_one()
+        else:
+            await conn.execute(
+                text("UPDATE watchlist_categories SET is_default = 1 WHERE id = :id"),
+                {"id": default_category_id},
+            )
+
+        await conn.execute(text("ALTER TABLE watchlist RENAME TO watchlist_legacy"))
+        await conn.execute(text(
+            """
+            CREATE TABLE watchlist (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                ticker VARCHAR(16) NOT NULL,
+                category_id INTEGER NOT NULL,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_watchlist_category_ticker UNIQUE (category_id, ticker),
+                FOREIGN KEY(category_id) REFERENCES watchlist_categories (id) ON DELETE CASCADE
+            )
+            """
+        ))
+        await conn.execute(
+            text(
+                """
+                INSERT INTO watchlist (id, ticker, category_id, display_order, added_at)
+                SELECT
+                    id,
+                    ticker,
+                    :category_id,
+                    COALESCE(display_order, 0),
+                    COALESCE(added_at, CURRENT_TIMESTAMP)
+                FROM watchlist_legacy
+                ORDER BY display_order, ticker
+                """
+            ),
+            {"category_id": default_category_id},
+        )
+        await conn.execute(text("DROP TABLE watchlist_legacy"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_watchlist_ticker ON watchlist (ticker)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_watchlist_category_id ON watchlist (category_id)"
+        ))
 
 
 async def _load_tickers_from_db() -> tuple[list[str], list[str]]:
@@ -66,14 +158,11 @@ async def _load_tickers_from_db() -> tuple[list[str], list[str]]:
     async with AsyncSessionLocal() as db:
         # Pastikan baris portfolio_meta ada
         await PortfolioService.ensure_meta(db)
+        await PortfolioService.ensure_default_watchlist_category(db)
 
         h_result = await db.execute(select(Holding))
         holdings = [str(h.ticker) for h in h_result.scalars().all()]
-
-        w_result = await db.execute(
-            select(Watchlist).order_by(Watchlist.display_order)
-        )
-        watchlist = [str(w.ticker) for w in w_result.scalars().all()]
+        watchlist = await PortfolioService.get_watchlist_tickers(db)
 
     logger.info(
         "Loaded from SQLite — holdings: %d, watchlist: %d",
