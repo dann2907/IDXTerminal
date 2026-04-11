@@ -26,13 +26,13 @@ if (!document.head.querySelector(`link[href="${fontLink.href}"]`)) {
 const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0c1520; color: #c8d8f0; font-family: 'Space Mono', monospace; }
-
+ 
   .terminal {
     display: flex; flex-direction: column;
     height: 100vh; width: 100vw; overflow: hidden;
     background: #0c1520;
   }
-
+ 
   /* ── Topbar ── */
   .topbar {
     display: flex; align-items: center; gap: 12px;
@@ -50,25 +50,26 @@ const CSS = `
     font-size: 15px; color: #2e8fdf; letter-spacing: 3px;
   }
   .logo span { color: #4a6080; }
-
+ 
   .ihsg-pill {
     display: flex; align-items: center; gap: 6px;
-    padding: 4px 10px; border-radius: 4px;
+    padding: 5px 12px; border-radius: 4px;
     background: #0a1628; border: 1px solid #0f2040;
-    font-size: 10px;
+    font-size: 11px;
   }
-  .ihsg-label { color: #4a6080; letter-spacing: 1px; font-family: 'Syne', sans-serif; font-size: 8px; }
+  /* FIX: was 8px — below WCAG min */
+  .ihsg-label { color: #4a6080; letter-spacing: 1px; font-family: 'Syne', sans-serif; font-size: 10px; }
   .ihsg-val   { color: #c8d8f0; font-weight: 700; }
   .ihsg-ch.up { color: #00d68f; }
   .ihsg-ch.dn { color: #ff4560; }
-
+ 
   .market-status {
     display: flex; align-items: center; gap: 6px;
-    font-size: 10px; color: #4a6080; letter-spacing: 1px;
+    font-size: 11px; color: #4a6080; letter-spacing: 1px;
     margin-right: auto; margin-left: 16px;
   }
   .dot-pulse {
-    width: 6px; height: 6px; border-radius: 50%;
+    width: 7px; height: 7px; border-radius: 50%;
     background: #00d68f;
     animation: pulse 2s infinite;
   }
@@ -77,10 +78,11 @@ const CSS = `
     0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #00d68f66; }
     50% { opacity: 0.7; box-shadow: 0 0 0 4px transparent; }
   }
-
+ 
   .nav-tabs { display: flex; gap: 2px; }
+  /* FIX: font-size 9px → 10px; padding 6px 14px → 7px 16px */
   .nav-tab {
-    padding: 6px 14px; font-size: 9px; letter-spacing: 1px;
+    padding: 7px 16px; font-size: 10px; letter-spacing: 1px;
     text-transform: uppercase; border: none; cursor: pointer;
     background: transparent; color: #4a6080; border-radius: 3px;
     font-family: 'Syne', sans-serif; font-weight: 600;
@@ -88,28 +90,29 @@ const CSS = `
   }
   .nav-tab:hover { color: #94a3b8; background: #0f1e35; }
   .nav-tab.active { color: #00d68f; background: #00d68f11; }
-
+ 
   /* ── Layout ── */
   .body { display: flex; flex: 1; overflow: hidden; height: calc(100vh - 48px); }
-
+ 
   /* ── Left Sidebar ── */
   .sidebar {
-    width: 200px; flex-shrink: 0;
+    width: 210px; flex-shrink: 0;
     background: #070d1c;
     border-right: 1px solid #0f2040;
     display: flex; flex-direction: column;
     overflow: hidden;
   }
   .sidebar-section { padding: 10px 0; border-bottom: 1px solid #0a1830; }
+  /* FIX: 8px → 11px; #2a4060 → #4a6080 (contrast) */
   .sidebar-title {
-    font-size: 8px; letter-spacing: 2px; color: #2a4060;
-    text-transform: uppercase; padding: 0 12px 6px;
+    font-size: 11px; letter-spacing: 1px; color: #4a6080;
+    text-transform: uppercase; padding: 0 12px 7px;
     font-family: 'Syne', sans-serif; font-weight: 700;
   }
-
+ 
   .watchlist-item {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 5px 12px; cursor: pointer;
+    padding: 7px 12px; cursor: pointer;
     border-left: 2px solid transparent;
     transition: all 0.12s;
   }
@@ -117,37 +120,40 @@ const CSS = `
   .watchlist-item.active { background: #0a1e38; border-left-color: #00d68f; }
   .watchlist-item-wrap { position: relative; }
   .watchlist-item-wrap .wi-remove {
-    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
     display: none;
-    padding: 1px 4px; font-size: 9px; line-height: 1;
+    padding: 2px 5px; font-size: 10px; line-height: 1;
     background: rgba(255,69,96,0.15);
     border: 1px solid rgba(255,69,96,0.35);
     border-radius: 3px; color: #ff4560; cursor: pointer;
   }
   .watchlist-item-wrap:hover .wi-remove { display: block; }
-  .wi-sym { font-size: 10px; color: #8aa8cc; font-weight: 700; }
-  .wi-price { font-size: 10px; color: #c8d8f0; }
-  .wi-ch { font-size: 9px; }
-  .wi-spark { margin-top: 2px; }
-
+  /* FIX: 10px → 11px */
+  .wi-sym { font-size: 11px; color: #8aa8cc; font-weight: 700; }
+  .wi-price { font-size: 11px; color: #c8d8f0; }
+  /* FIX: 9px → 10px */
+  .wi-ch { font-size: 10px; }
+  .wi-spark { margin-top: 3px; }
+ 
   /* ── Main ── */
   .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-
+ 
   /* ── Chart page ── */
   .chart-header { padding: 10px 14px 8px; border-bottom: 1px solid #0f2040; display: flex; align-items: center; gap: 14px; }
   .ch-sym  { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 15px; color: #2e8fdf; }
   .ch-price { font-size: 20px; color: #eff6ff; font-weight: 700; }
-  .ch-meta  { font-size: 9px; }
-  .period-tabs { display: flex; gap: 3px; margin-left: auto; }
+  .ch-meta  { font-size: 10px; }
+  .period-tabs { display: flex; gap: 4px; margin-left: auto; }
+  /* FIX: 8px → 10px; 3px 8px → 6px 12px (touch target) */
   .period-btn {
-    padding: 3px 8px; font-size: 8px; font-family: 'Syne', sans-serif;
+    padding: 6px 12px; font-size: 10px; font-family: 'Syne', sans-serif;
     font-weight: 700; letter-spacing: 1px; border: 1px solid #0f2040;
     background: transparent; color: #4a6080; border-radius: 3px; cursor: pointer;
-    transition: all 0.12s;
+    transition: all 0.12s; min-width: 36px; text-align: center;
   }
   .period-btn:hover { background: #0a1628; color: #8aa8cc; }
   .period-btn.active { background: #2e8fdf22; color: #2e8fdf; border-color: #2e8fdf44; }
-
+ 
   .chart-box { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 8px; gap: 0; }
   .chart-inner { flex: 1; min-height: 0; }
   .indicator-row {
@@ -156,11 +162,11 @@ const CSS = `
   }
   .ind-pill {
     display: flex; gap: 6px; align-items: center;
-    padding: 3px 8px; border: 1px solid #0f2040;
-    border-radius: 3px; font-size: 9px; color: #4a6080;
+    padding: 4px 10px; border: 1px solid #0f2040;
+    border-radius: 3px; font-size: 10px; color: #4a6080;
     font-family: 'Syne', sans-serif;
   }
-
+ 
   /* ── Right Panel ── */
   .panel {
     width: 220px; flex-shrink: 0;
@@ -169,56 +175,60 @@ const CSS = `
     display: flex; flex-direction: column;
     overflow-y: auto; overflow-x: hidden;
   }
-  .panel-section { padding: 10px 12px; border-bottom: 1px solid #0a1830; }
+  .panel-section { padding: 12px; border-bottom: 1px solid #0a1830; }
+  /* FIX: 8px → 11px; #2a4060 → #4a6080 */
   .panel-title {
-    font-family: 'Syne', sans-serif; font-size: 8px; letter-spacing: 2px;
-    color: #2a4060; text-transform: uppercase; margin-bottom: 8px;
+    font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 1px;
+    color: #4a6080; text-transform: uppercase; margin-bottom: 8px;
   }
   .summary-val { font-size: 13px; color: #eff6ff; font-weight: 700; }
-  .summary-label { font-size: 8px; color: #4a6080; margin-top: 2px; }
-
+  /* FIX: 8px → 10px */
+  .summary-label { font-size: 10px; color: #4a6080; margin-top: 2px; }
+ 
   .holding-item {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 5px 0; border-bottom: 1px solid #070d1c;
-    font-size: 10px;
+    padding: 6px 0; border-bottom: 1px solid #070d1c;
+    font-size: 11px;
   }
-  .h-sym { color: #8aa8cc; font-weight: 700; font-size: 10px; }
-  .h-lots { color: #4a6080; font-size: 9px; }
-
+  .h-sym { color: #8aa8cc; font-weight: 700; font-size: 11px; }
+  .h-lots { color: #4a6080; font-size: 10px; }
+ 
   .mover-item {
-    display: flex; align-items: center; gap: 6px; padding: 4px 0;
-    border-bottom: 1px solid #0a1830; font-size: 10px;
+    display: flex; align-items: center; gap: 6px; padding: 5px 0;
+    border-bottom: 1px solid #0a1830; font-size: 11px;
   }
-  .mv-sym { color: #8aa8cc; font-weight: 700; width: 52px; flex-shrink: 0; }
+  .mv-sym { color: #8aa8cc; font-weight: 700; width: 54px; flex-shrink: 0; }
   .mv-bar { flex: 1; height: 3px; border-radius: 2px; opacity: 0.6; }
-  .mv-ch { font-size: 9px; font-weight: 700; width: 44px; text-align: right; flex-shrink: 0; }
-
+  .mv-ch { font-size: 10px; font-weight: 700; width: 48px; text-align: right; flex-shrink: 0; }
+ 
   .up { color: #00d68f; }
   .dn { color: #ff4560; }
-
+ 
   /* ── Feed Bar ── */
   .feed-bar {
     height: 28px; flex-shrink: 0;
     background: #040810; border-top: 1px solid #0a1830;
     display: flex; align-items: center; overflow: hidden;
   }
+  /* FIX: 8px → 10px */
   .feed-label {
-    padding: 0 10px; font-size: 8px; letter-spacing: 2px; color: #2a4060;
+    padding: 0 10px; font-size: 10px; letter-spacing: 1px; color: #4a6080;
     border-right: 1px solid #0a1830; flex-shrink: 0;
     font-family: 'Syne', sans-serif;
   }
   .ticker-tape { display: flex; gap: 24px; padding: 0 16px; overflow: hidden; }
-  .tape-item { display: flex; gap: 6px; align-items: center; font-size: 9px; flex-shrink: 0; }
-  .tape-sym { color: #4a6080; font-family: 'Syne', sans-serif; font-size: 8px; font-weight: 700; }
-
+  .tape-item { display: flex; gap: 6px; align-items: center; font-size: 10px; flex-shrink: 0; }
+  /* FIX: 8px → 10px */
+  .tape-sym { color: #4a6080; font-family: 'Syne', sans-serif; font-size: 10px; font-weight: 700; }
+ 
   /* ── Trade form ── */
   .trade-input {
     width: 100%; background: #040d1a; border: 1px solid #0f2040; border-radius: 3px;
-    color: #c8d8f0; font-family: 'Space Mono', monospace; font-size: 10px;
-    padding: 5px 8px; outline: none; margin-bottom: 5px;
+    color: #c8d8f0; font-family: 'Space Mono', monospace; font-size: 11px;
+    padding: 6px 8px; outline: none; margin-bottom: 6px;
   }
   .trade-input:focus { border-color: #2e8fdf66; }
-
+ 
   /* ── Heatmap ── */
   .hm-grid { display: flex; flex-wrap: wrap; gap: 3px; padding: 12px; }
   .hm-cell {
@@ -227,14 +237,15 @@ const CSS = `
     transition: opacity 0.15s;
   }
   .hm-cell:hover { opacity: 0.8; }
-  .hm-sym { font-size: 8px; font-weight: 700; color: #000a; }
-  .hm-ch  { font-size: 7px; color: #000a; }
-
+  /* FIX: 8px → 11px; 7px → 10px (WORST offenders) */
+  .hm-sym { font-size: 11px; font-weight: 700; color: #000a; }
+  .hm-ch  { font-size: 10px; color: #000a; }
+ 
   /* ── Scrollbar ── */
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: #050a14; }
   ::-webkit-scrollbar-thumb { background: #0f2040; border-radius: 2px; }
-
+ 
   /* ── Flash animations ── */
   @keyframes flash-up { 0%,100%{background:transparent} 50%{background:#00d68f22} }
   @keyframes flash-dn { 0%,100%{background:transparent} 50%{background:#ff456022} }
@@ -338,6 +349,7 @@ export default function IDXTerminal() {
   }, [addToWatchlist, removeFromWatchlist, selectedTicker, watchlist]);
 
   const prevQuotesRef = useRef({});
+  const tradeMsgTimerRef = useRef(null);
 
   // ── Clock ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -382,6 +394,17 @@ export default function IDXTerminal() {
     }
   }, [watchlist]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-clear success tradeMsg after 6s; errors persist until dismissed.
+  useEffect(() => {
+    if (tradeMsg?.ok) {
+      if (tradeMsgTimerRef.current) clearTimeout(tradeMsgTimerRef.current);
+      tradeMsgTimerRef.current = setTimeout(() => setTradeMsg(null), 6000);
+    }
+    return () => {
+      if (tradeMsgTimerRef.current) clearTimeout(tradeMsgTimerRef.current);
+    };
+  }, [tradeMsg]);
+
   // ── Derived data ──────────────────────────────────────────────────────
   const selectedQuote = quotes[selectedTicker];
   const selectedCandles = candles[selectedTicker] || [];
@@ -413,7 +436,6 @@ export default function IDXTerminal() {
     const res = await fn(selectedTicker, lots, price);
     setTradeMsg(res);
     if (res.ok) setTradeLots("");
-    setTimeout(() => setTradeMsg(null), 4000);
   }, [tradeLots, tradeAction, selectedTicker, quotes, buy, sell]);
 
   const indicators = calcIndicators(selectedCandles);
@@ -490,8 +512,11 @@ export default function IDXTerminal() {
                 );
               })}
               {!displayedWatchlist.length && (
-                <div style={{ padding: "8px 12px", fontSize: 9, color: "#2a4060" }}>
-                  Watchlist kosong
+                <div style={{ padding: "12px", fontSize: 11, color: "#4a6080", lineHeight: 1.6 }}>
+                  <div style={{ marginBottom: 4 }}>Watchlist kosong</div>
+                  <div style={{ fontSize: 10, color: "#2a4060" }}>
+                    Gunakan 🔍 di atas untuk<br />cari & tambah saham
+                  </div>
                 </div>
               )}
             </div>
@@ -695,7 +720,16 @@ export default function IDXTerminal() {
                               </tr>
                             ))}
                             {!holdings.length && (
-                              <tr><td colSpan={7} style={{ padding: "12px 8px", color: "#2a4060", textAlign: "center" }}>Tidak ada holdings</td></tr>
+                              <tr>
+                                <td colSpan={7} style={{ padding: "32px 8px", textAlign: "center" }}>
+                                  <div style={{ fontSize: 24, marginBottom: 8 }}>📊</div>
+                                  <div style={{ fontSize: 13, color: "#4a6080", marginBottom: 6 }}>Belum ada holdings</div>
+                                  <div style={{ fontSize: 11, color: "#2a4060", lineHeight: 1.6 }}>
+                                    Gunakan panel <strong style={{ color: "#4a6080" }}>Quick Trade</strong> di kanan<br />
+                                    untuk mulai membeli saham pertama Anda
+                                  </div>
+                                </td>
+                              </tr>
                             )}
                           </tbody>
                         </table>
@@ -855,10 +889,11 @@ export default function IDXTerminal() {
             {/* Quick Trade */}
             <div className="panel-section">
               <div className="panel-title">Quick Trade — {selectedTicker.replace(".JK", "")}</div>
+
               <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
                 {["BUY", "SELL"].map(a => (
                   <button key={a} onClick={() => setTradeAction(a)} style={{
-                    flex: 1, padding: "6px 0", fontSize: 9, fontFamily: "'Syne',sans-serif",
+                    flex: 1, padding: "7px 0", fontSize: 10, fontFamily: "'Syne',sans-serif",
                     fontWeight: 700, letterSpacing: 1, border: "none", borderRadius: 3, cursor: "pointer",
                     background: tradeAction === a
                       ? (a === "BUY" ? "#00d68f33" : "#ff456033")
@@ -870,32 +905,98 @@ export default function IDXTerminal() {
                   }}>{a}</button>
                 ))}
               </div>
-              <input
-                className="trade-input"
-                type="number"
-                placeholder="Jumlah lot"
-                value={tradeLots}
-                onChange={e => setTradeLots(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleTrade()}
-              />
-              {selectedQuote && tradeLots && (
-                <div style={{ fontSize: 9, color: "#4a6080", marginBottom: 6 }}>
-                  ≈ {fmtRp(parseInt(tradeLots, 10) * 100 * selectedQuote.price)}
+
+              {selectedQuote && (
+                <div style={{
+                  background: "#040d1a",
+                  border: "1px solid #0f2040",
+                  borderRadius: 3,
+                  padding: "6px 8px",
+                  marginBottom: 8,
+                  fontSize: 11,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#4a6080" }}>Harga sekarang</span>
+                    <span style={{ color: "#c8d8f0", fontFamily: "'Space Mono',monospace" }}>
+                      {fmtPrice(selectedQuote.price)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+                    <span style={{ color: "#4a6080", fontSize: 10 }}>Perubahan</span>
+                    <span style={{ fontSize: 10 }} className={selectedQuote.change_pct >= 0 ? "up" : "dn"}>
+                      {selectedQuote.change_pct >= 0 ? "+" : ""}{selectedQuote.change_pct.toFixed(2)}%
+                    </span>
+                  </div>
                 </div>
               )}
+
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, color: "#4a6080", fontFamily: "'Syne',sans-serif" }}>JUMLAH LOT</span>
+                  <span style={{ fontSize: 10, color: "#2e8fdf" }}>1 lot = 100 lembar</span>
+                </div>
+                <input
+                  className="trade-input"
+                  type="number"
+                  placeholder="Jumlah lot (mis. 5)"
+                  min={1}
+                  value={tradeLots}
+                  onChange={e => setTradeLots(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleTrade()}
+                />
+              </div>
+
+              {selectedQuote && tradeLots && (
+                <div style={{
+                  background: "#040d1a",
+                  border: "1px solid #0f2040",
+                  borderRadius: 3,
+                  padding: "6px 8px",
+                  marginBottom: 8,
+                  fontSize: 10,
+                  color: "#4a6080",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Estimasi nilai</span>
+                    <span style={{ color: "#c8d8f0", fontFamily: "'Space Mono',monospace" }}>
+                      ≈ {fmtRp(parseInt(tradeLots, 10) * 100 * selectedQuote.price)}
+                    </span>
+                  </div>
+                  <div style={{ color: "#2a4060", marginTop: 2 }}>
+                    {tradeLots} lot × 100 lembar × {fmtPrice(selectedQuote.price)}
+                  </div>
+                </div>
+              )}
+
               <button onClick={handleTrade} style={{
-                width: "100%", padding: "7px 0", fontSize: 9, fontFamily: "'Syne',sans-serif",
+                width: "100%", padding: "8px 0", fontSize: 11, fontFamily: "'Syne',sans-serif",
                 fontWeight: 700, letterSpacing: 1, border: "none", borderRadius: 3, cursor: "pointer",
                 background: tradeAction === "BUY" ? "#00d68f" : "#ff4560",
                 color: "#050a14",
+                opacity: !tradeLots ? 0.6 : 1,
               }}>{tradeAction === "BUY" ? "▲ BUY" : "▼ SELL"}</button>
+
               {tradeMsg && (
                 <div style={{
-                  marginTop: 6, padding: "5px 8px", borderRadius: 3, fontSize: 9,
+                  marginTop: 7, padding: "6px 9px", borderRadius: 3, fontSize: 11,
                   background: tradeMsg.ok ? "#00d68f11" : "#ff456011",
                   color: tradeMsg.ok ? "#00d68f" : "#ff4560",
                   border: `1px solid ${tradeMsg.ok ? "#00d68f33" : "#ff456033"}`,
-                }}>{tradeMsg.message}</div>
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 4,
+                }}>
+                  <span style={{ flex: 1 }}>{tradeMsg.message}</span>
+                  {!tradeMsg.ok && (
+                    <button
+                      onClick={() => setTradeMsg(null)}
+                      style={{ background: "transparent", border: "none", color: "#ff4560", cursor: "pointer", fontSize: 12, padding: 0, flexShrink: 0 }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
