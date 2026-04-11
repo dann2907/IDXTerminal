@@ -1,5 +1,5 @@
 # main.py
-#
+# .venv\Scripts\activate 
 # FastAPI app entry point — Fase 3 update.
 # Startup order:
 #   1. Buat tabel SQLite jika belum ada
