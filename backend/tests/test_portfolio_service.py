@@ -163,6 +163,29 @@ class PortfolioServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item["ticker"] for item in default_items], ["BBCA.JK"])
             self.assertEqual(dividend_items, [])
 
+    async def test_watchlist_category_can_be_renamed_and_deleted(self) -> None:
+        async with self.SessionLocal() as db:
+            await PortfolioService.ensure_default_watchlist_category(db)
+            ok, _, category = await PortfolioService.create_watchlist_category(db, "Trading Plan")
+            self.assertTrue(ok)
+            assert category is not None
+
+            ok, _, renamed = await PortfolioService.rename_watchlist_category(
+                db,
+                category["id"],
+                "Swing Trade",
+            )
+            self.assertTrue(ok)
+            assert renamed is not None
+            self.assertEqual(renamed["name"], "Swing Trade")
+
+            ok, _ = await PortfolioService.delete_watchlist_category(db, category["id"])
+            self.assertTrue(ok)
+
+            grouped = await PortfolioService.get_watchlist_categories(db)
+            names = [group["name"] for group in grouped]
+            self.assertNotIn("Swing Trade", names)
+
 
 if __name__ == "__main__":
     unittest.main()

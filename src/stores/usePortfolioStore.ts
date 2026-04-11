@@ -146,6 +146,15 @@ interface PortfolioState {
     message: string;
     category?: WatchlistCategory;
   }>;
+  renameWatchlistCategory: (categoryId: number, name: string) => Promise<{
+    ok: boolean;
+    message: string;
+    category?: WatchlistCategory;
+  }>;
+  deleteWatchlistCategory: (categoryId: number) => Promise<{
+    ok: boolean;
+    message: string;
+  }>;
 
   // ── WS handler (dipanggil oleh useMarketStore) ───────────────────────────
   handleWsMessage: (msg: { type: string; data: unknown }) => void;
@@ -402,6 +411,38 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       }>("/watchlist/categories", {
         method: "POST",
         body: JSON.stringify({ name }),
+      });
+      await get().fetchWatchlist();
+      return res;
+    } catch (e) {
+      return { ok: false, message: (e as Error).message };
+    }
+  },
+
+  async renameWatchlistCategory(categoryId, name) {
+    try {
+      const res = await apiFetch<{
+        ok: boolean;
+        message: string;
+        category: WatchlistCategory;
+      }>(`/watchlist/categories/${categoryId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+      await get().fetchWatchlist();
+      return res;
+    } catch (e) {
+      return { ok: false, message: (e as Error).message };
+    }
+  },
+
+  async deleteWatchlistCategory(categoryId) {
+    try {
+      const res = await apiFetch<{
+        ok: boolean;
+        message: string;
+      }>(`/watchlist/categories/${categoryId}`, {
+        method: "DELETE",
       });
       await get().fetchWatchlist();
       return res;

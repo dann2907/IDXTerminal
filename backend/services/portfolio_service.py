@@ -707,6 +707,54 @@ class PortfolioService:
         }
 
     @staticmethod
+    async def rename_watchlist_category(
+        db: AsyncSession,
+        category_id: int,
+        name: str,
+    ) -> tuple[bool, str, Optional[dict]]:
+        normalized_name = " ".join(name.strip().split())
+        if not normalized_name:
+            return False, "Nama watchlist tidak boleh kosong", None
+
+        category = await db.get(WatchlistCategory, category_id)
+        if category is None:
+            return False, "Kategori watchlist tidak ditemukan", None
+
+        existing = await db.execute(
+            select(WatchlistCategory).where(
+                func.lower(WatchlistCategory.name) == normalized_name.lower(),
+                WatchlistCategory.id != category_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            return False, f'Watchlist "{normalized_name}" sudah ada', None
+
+        category.name = normalized_name
+        await db.commit()
+        await db.refresh(category)
+        return True, f'Watchlist diubah menjadi "{normalized_name}"', {
+            "id": category.id,
+            "name": category.name,
+            "is_default": category.is_default,
+        }
+
+    @staticmethod
+    async def delete_watchlist_category(
+        db: AsyncSession,
+        category_id: int,
+    ) -> tuple[bool, str]:
+        category = await db.get(WatchlistCategory, category_id)
+        if category is None:
+            return False, "Kategori watchlist tidak ditemukan"
+        if category.is_default:
+            return False, "Kategori default tidak bisa dihapus"
+
+        name = category.name
+        await db.delete(category)
+        await db.commit()
+        return True, f'Watchlist "{name}" dihapus'
+
+    @staticmethod
     async def watchlist_add(
         db: AsyncSession,
         ticker: str,

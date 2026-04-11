@@ -144,6 +144,12 @@ const CSS = `
     font-size: 10px; font-family: 'Syne', sans-serif; transition: all 0.12s;
   }
   .watchlist-btn:hover { border-color: #1e3a5f; color: #c8d8f0; }
+  .watchlist-btn:disabled {
+    cursor: default;
+    opacity: 0.45;
+    border-color: #0f2040;
+    color: #4a6080;
+  }
   .watchlist-btn.primary {
     background: rgba(46,143,223,0.14);
     border-color: rgba(46,143,223,0.32);
@@ -375,6 +381,8 @@ export default function IDXTerminal() {
   const addToWatchlist = usePortfolioStore(s => s.addToWatchlist);
   const removeFromWatchlist = usePortfolioStore(s => s.removeFromWatchlist);
   const createWatchlistCategory = usePortfolioStore(s => s.createWatchlistCategory);
+  const renameWatchlistCategory = usePortfolioStore(s => s.renameWatchlistCategory);
+  const deleteWatchlistCategory = usePortfolioStore(s => s.deleteWatchlistCategory);
   const buy = usePortfolioStore(s => s.buy);
   const sell = usePortfolioStore(s => s.sell);
 
@@ -444,6 +452,27 @@ export default function IDXTerminal() {
     setWatchlistMsg(res);
     if (res.ok) setWatchlistTickerInput("");
   }, [activeWatchlistCategory, addToWatchlist, watchlistTickerInput]);
+
+  const handleRenameWatchlist = useCallback(async () => {
+    if (!activeWatchlistCategory) return;
+    const nextName = window.prompt(
+      "Nama baru watchlist:",
+      activeWatchlistCategory.name,
+    );
+    if (!nextName || nextName.trim() === activeWatchlistCategory.name) return;
+    const res = await renameWatchlistCategory(activeWatchlistCategory.id, nextName);
+    setWatchlistMsg(res);
+  }, [activeWatchlistCategory, renameWatchlistCategory]);
+
+  const handleDeleteWatchlist = useCallback(async () => {
+    if (!activeWatchlistCategory || activeWatchlistCategory.is_default) return;
+    const confirmed = window.confirm(
+      `Hapus watchlist "${activeWatchlistCategory.name}" beserta semua ticker di dalamnya?`,
+    );
+    if (!confirmed) return;
+    const res = await deleteWatchlistCategory(activeWatchlistCategory.id);
+    setWatchlistMsg(res);
+  }, [activeWatchlistCategory, deleteWatchlistCategory]);
 
   const prevQuotesRef = useRef({});
   const tradeMsgTimerRef = useRef(null);
@@ -632,6 +661,21 @@ export default function IDXTerminal() {
               )}
               <div className="watchlist-active-label">
                 {activeWatchlistCategory ? `Ticker di ${activeWatchlistCategory.name}` : "Belum ada kategori"}
+              </div>
+              <div className="watchlist-form">
+                <button
+                  className="watchlist-btn"
+                  onClick={handleRenameWatchlist}
+                  disabled={!activeWatchlistCategory}>
+                  Rename
+                </button>
+                <button
+                  className="watchlist-btn"
+                  onClick={handleDeleteWatchlist}
+                  disabled={!activeWatchlistCategory || activeWatchlistCategory.is_default}
+                  title={activeWatchlistCategory?.is_default ? "Kategori default tidak bisa dihapus" : "Hapus watchlist aktif"}>
+                  Delete
+                </button>
               </div>
               <div className="watchlist-form">
                 <input

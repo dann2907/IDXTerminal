@@ -127,6 +127,10 @@ class WatchlistCategoryCreateRequest(BaseModel):
         return " ".join(v.strip().split())
 
 
+class WatchlistCategoryRenameRequest(WatchlistCategoryCreateRequest):
+    pass
+
+
 class ConfirmOrderRequest(BaseModel):
     price: float = Field(..., gt=0, description="Harga eksekusi aktual")
 
@@ -286,6 +290,34 @@ async def create_watchlist_category(
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
     return JSONResponse({"ok": True, "message": msg, "category": category})
+
+
+@router.patch("/watchlist/categories/{category_id}")
+async def rename_watchlist_category(
+    category_id: int,
+    req: WatchlistCategoryRenameRequest,
+) -> JSONResponse:
+    """Ubah nama kategori watchlist yang sudah ada."""
+    async with AsyncSessionLocal() as db:
+        ok, msg, category = await PortfolioService.rename_watchlist_category(
+            db,
+            category_id,
+            req.name,
+        )
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return JSONResponse({"ok": True, "message": msg, "category": category})
+
+
+@router.delete("/watchlist/categories/{category_id}")
+async def delete_watchlist_category(category_id: int) -> JSONResponse:
+    """Hapus kategori watchlist non-default beserta item di dalamnya."""
+    async with AsyncSessionLocal() as db:
+        ok, msg = await PortfolioService.delete_watchlist_category(db, category_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    await _sync_watchlist_registry()
+    return JSONResponse({"ok": True, "message": msg})
 
 
 @router.post("/watchlist")
