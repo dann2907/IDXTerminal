@@ -1,9 +1,7 @@
 // src/components/auth/LoginPage.tsx
 //
-// Halaman login / register — ditampilkan oleh App.tsx
-// jika user belum login (token null atau expired).
-//
-// Design: Bloomberg-dark minimal, dua tab Login / Register.
+// FIX UX: tambah tombol show/hide password agar user bisa verifikasi
+// ketikan sebelum submit — mengurangi friction register & login.
 
 import { useState } from "react";
 import { useAuthStore } from "../../stores/useAuthStore";
@@ -27,16 +25,16 @@ const INPUT: React.CSSProperties = {
   borderRadius: 4,
   color:        C.text,
   fontFamily:   "'Space Mono', monospace",
-  fontSize:     12,
-  padding:      "8px 12px",
+  fontSize:     13,
+  padding:      "8px 40px 8px 12px",
   outline:      "none",
   boxSizing:    "border-box",
 };
 
 const BTN_PRIMARY: React.CSSProperties = {
   width:        "100%",
-  padding:      "9px 0",
-  fontSize:     11,
+  padding:      "10px 0",
+  fontSize:     12,
   fontFamily:   "'Syne', sans-serif",
   fontWeight:   700,
   letterSpacing: 1,
@@ -47,17 +45,41 @@ const BTN_PRIMARY: React.CSSProperties = {
   cursor:       "pointer",
 };
 
+const EYE_BTN: React.CSSProperties = {
+  position:   "absolute",
+  right:      10,
+  top:        "50%",
+  transform:  "translateY(-50%)",
+  background: "none",
+  border:     "none",
+  color:      C.label,
+  cursor:     "pointer",
+  fontSize:   11,
+  fontFamily: "'Syne', sans-serif",
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  padding:    "2px 4px",
+  lineHeight: 1,
+};
+
 export default function LoginPage() {
   const { login, register, loading, error } = useAuthStore();
 
-  const [tab,        setTab]        = useState<"login" | "register">("login");
-  const [username,   setUsername]   = useState("");
-  const [email,      setEmail]      = useState("");
-  const [password,   setPassword]   = useState("");
-  const [password2,  setPassword2]  = useState("");
-  const [localMsg,   setLocalMsg]   = useState<{ ok: boolean; text: string } | null>(null);
+  const [tab,       setTab]       = useState<"login" | "register">("login");
+  const [username,  setUsername]  = useState("");
+  const [email,     setEmail]     = useState("");
+  const [password,  setPassword]  = useState("");
+  const [password2, setPassword2] = useState("");
+  const [localMsg,  setLocalMsg]  = useState<{ ok: boolean; text: string } | null>(null);
 
-  const reset = () => { setUsername(""); setEmail(""); setPassword(""); setPassword2(""); setLocalMsg(null); };
+  // FIX: show/hide password state
+  const [showPw,  setShowPw]  = useState(false);
+  const [showPw2, setShowPw2] = useState(false);
+
+  const reset = () => {
+    setUsername(""); setEmail(""); setPassword(""); setPassword2("");
+    setLocalMsg(null); setShowPw(false); setShowPw2(false);
+  };
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -95,6 +117,9 @@ export default function LoginPage() {
           <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 18, fontWeight: 700, color: C.text, letterSpacing: 2 }}>
             IDX<span style={{ color: C.accent }}>TERMINAL</span>
           </span>
+          <div style={{ fontSize: 11, color: C.label, marginTop: 4, fontFamily: "'Syne',sans-serif" }}>
+            Virtual Trading · Pasar Saham Indonesia
+          </div>
         </div>
 
         {/* Tabs */}
@@ -102,7 +127,7 @@ export default function LoginPage() {
           {(["login", "register"] as const).map(t => (
             <button key={t} onClick={() => { setTab(t); reset(); }}
               style={{
-                flex: 1, padding: "7px 0", fontSize: 10,
+                flex: 1, padding: "8px 0", fontSize: 11,
                 fontFamily: "'Syne',sans-serif", fontWeight: 700,
                 letterSpacing: 1, border: "none",
                 background: "transparent", cursor: "pointer",
@@ -116,16 +141,26 @@ export default function LoginPage() {
 
         {/* ── Login form ── */}
         {tab === "login" && (
-          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Field label="Username">
               <input value={username} onChange={e => setUsername(e.target.value)}
-                placeholder="username" autoComplete="username" style={INPUT} required />
+                placeholder="username" autoComplete="username"
+                style={{ ...INPUT, paddingRight: 12 }} required />
             </Field>
             <Field label="Password">
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••" autoComplete="current-password" style={INPUT} required />
+              {/* FIX: show/hide password */}
+              <div style={{ position: "relative" }}>
+                <input type={showPw ? "text" : "password"}
+                  value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••" autoComplete="current-password"
+                  style={INPUT} required />
+                <button type="button" onClick={() => setShowPw(v => !v)} style={EYE_BTN}>
+                  {showPw ? "SEMBUNYIKAN" : "LIHAT"}
+                </button>
+              </div>
             </Field>
-            <button type="submit" disabled={loading} style={{ ...BTN_PRIMARY, opacity: loading ? 0.6 : 1, marginTop: 4 }}>
+            <button type="submit" disabled={loading}
+              style={{ ...BTN_PRIMARY, opacity: loading ? 0.6 : 1, marginTop: 4 }}>
               {loading ? "Memproses..." : "Masuk"}
             </button>
           </form>
@@ -133,24 +168,51 @@ export default function LoginPage() {
 
         {/* ── Register form ── */}
         {tab === "register" && (
-          <form onSubmit={handleRegister} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <form onSubmit={handleRegister} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Field label="Username">
               <input value={username} onChange={e => setUsername(e.target.value)}
-                placeholder="min. 3 karakter" autoComplete="username" style={INPUT} required />
+                placeholder="min. 3 karakter" autoComplete="username"
+                style={{ ...INPUT, paddingRight: 12 }} required />
             </Field>
             <Field label="Email">
               <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="nama@email.com" autoComplete="email" style={INPUT} required />
+                placeholder="nama@email.com" autoComplete="email"
+                style={{ ...INPUT, paddingRight: 12 }} required />
             </Field>
             <Field label="Password">
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="min. 8 karakter" autoComplete="new-password" style={INPUT} required />
+              <div style={{ position: "relative" }}>
+                <input type={showPw ? "text" : "password"}
+                  value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="min. 8 karakter" autoComplete="new-password"
+                  style={INPUT} required />
+                <button type="button" onClick={() => setShowPw(v => !v)} style={EYE_BTN}>
+                  {showPw ? "SEMBUNYIKAN" : "LIHAT"}
+                </button>
+              </div>
             </Field>
             <Field label="Konfirmasi password">
-              <input type="password" value={password2} onChange={e => setPassword2(e.target.value)}
-                placeholder="ulangi password" autoComplete="new-password" style={INPUT} required />
+              <div style={{ position: "relative" }}>
+                <input type={showPw2 ? "text" : "password"}
+                  value={password2} onChange={e => setPassword2(e.target.value)}
+                  placeholder="ulangi password" autoComplete="new-password"
+                  style={{
+                    ...INPUT,
+                    // FIX: highlight mismatch saat keduanya terisi
+                    borderColor: password2 && password !== password2 ? C.dn : C.border,
+                  }} required />
+                <button type="button" onClick={() => setShowPw2(v => !v)} style={EYE_BTN}>
+                  {showPw2 ? "SEMBUNYIKAN" : "LIHAT"}
+                </button>
+              </div>
+              {/* Inline mismatch hint — lebih cepat dari menunggu submit */}
+              {password2 && password !== password2 && (
+                <div style={{ fontSize: 11, color: C.dn, marginTop: 4 }}>
+                  Password tidak cocok
+                </div>
+              )}
             </Field>
-            <button type="submit" disabled={loading} style={{ ...BTN_PRIMARY, background: C.up, opacity: loading ? 0.6 : 1, marginTop: 4 }}>
+            <button type="submit" disabled={loading || (!!password2 && password !== password2)}
+              style={{ ...BTN_PRIMARY, background: C.up, opacity: loading ? 0.6 : 1, marginTop: 4 }}>
               {loading ? "Memproses..." : "Daftar"}
             </button>
           </form>
@@ -159,7 +221,7 @@ export default function LoginPage() {
         {/* Feedback */}
         {localMsg && (
           <div style={{
-            marginTop: 10, padding: "7px 12px", borderRadius: 4, fontSize: 11,
+            marginTop: 12, padding: "8px 12px", borderRadius: 4, fontSize: 12,
             background: localMsg.ok ? "rgba(0,214,143,0.1)" : "rgba(255,69,96,0.1)",
             color:      localMsg.ok ? C.up : C.dn,
             border:     `1px solid ${localMsg.ok ? "rgba(0,214,143,0.3)" : "rgba(255,69,96,0.3)"}`,
@@ -175,8 +237,8 @@ export default function LoginPage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontSize: 9, color: C.label, fontFamily: "'Syne',sans-serif",
-        letterSpacing: 1, marginBottom: 4 }}>{label.toUpperCase()}</div>
+      <div style={{ fontSize: 10, color: C.label, fontFamily: "'Syne',sans-serif",
+        letterSpacing: 1, marginBottom: 5 }}>{label.toUpperCase()}</div>
       {children}
     </div>
   );

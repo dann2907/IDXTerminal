@@ -82,7 +82,7 @@ const CSS = `
   .nav-tabs { display: flex; gap: 2px; }
   /* FIX: font-size 9px → 10px; padding 6px 14px → 7px 16px */
   .nav-tab {
-    padding: 7px 16px; font-size: 10px; letter-spacing: 1px;
+    padding: 7px 16px; font-size: 11px; letter-spacing: 1px;
     text-transform: uppercase; border: none; cursor: pointer;
     background: transparent; color: #4a6080; border-radius: 3px;
     font-family: 'Syne', sans-serif; font-weight: 600;
@@ -105,7 +105,7 @@ const CSS = `
   .sidebar-section { padding: 10px 0; border-bottom: 1px solid #0a1830; }
   /* FIX: 8px → 11px; #2a4060 → #4a6080 (contrast) */
   .sidebar-title {
-    font-size: 11px; letter-spacing: 1px; color: #4a6080;
+    font-size: 10px; letter-spacing: 1px; color: #4a6080;
     text-transform: uppercase; padding: 0 12px 7px;
     font-family: 'Syne', sans-serif; font-weight: 700;
   }
@@ -189,10 +189,10 @@ const CSS = `
   }
   .watchlist-item-wrap:hover .wi-remove { display: block; }
   /* FIX: 10px → 11px */
-  .wi-sym { font-size: 11px; color: #8aa8cc; font-weight: 700; }
-  .wi-price { font-size: 11px; color: #c8d8f0; }
+  .wi-sym { font-size: 12px; color: #8aa8cc; font-weight: 700; }
+  .wi-price { font-size: 12px; color: #c8d8f0; }
   /* FIX: 9px → 10px */
-  .wi-ch { font-size: 10px; }
+  .wi-ch { font-size: 11px; }
   .wi-spark { margin-top: 3px; }
  
   /* ── Main ── */
@@ -206,7 +206,7 @@ const CSS = `
   .period-tabs { display: flex; gap: 4px; margin-left: auto; }
   /* FIX: 8px → 10px; 3px 8px → 6px 12px (touch target) */
   .period-btn {
-    padding: 6px 12px; font-size: 10px; font-family: 'Syne', sans-serif;
+    padding: 6px 12px; font-size: 11px; font-family: 'Syne', sans-serif;
     font-weight: 700; letter-spacing: 1px; border: 1px solid #0f2040;
     background: transparent; color: #4a6080; border-radius: 3px; cursor: pointer;
     transition: all 0.12s; min-width: 36px; text-align: center;
@@ -223,7 +223,7 @@ const CSS = `
   .ind-pill {
     display: flex; gap: 6px; align-items: center;
     padding: 4px 10px; border: 1px solid #0f2040;
-    border-radius: 3px; font-size: 10px; color: #4a6080;
+    border-radius: 3px; font-size: 11px; color: #4a6080;
     font-family: 'Syne', sans-serif;
   }
  
@@ -241,25 +241,25 @@ const CSS = `
     font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 1px;
     color: #4a6080; text-transform: uppercase; margin-bottom: 8px;
   }
-  .summary-val { font-size: 13px; color: #eff6ff; font-weight: 700; }
-  /* FIX: 8px → 10px */
-  .summary-label { font-size: 10px; color: #4a6080; margin-top: 2px; }
+  .summary-val { font-size: 14px; color: #eff6ff; font-weight: 700; }
+  
+  .summary-label { font-size: 11px; color: #4a6080; margin-top: 2px; }
  
   .holding-item {
     display: flex; align-items: center; justify-content: space-between;
     padding: 6px 0; border-bottom: 1px solid #070d1c;
     font-size: 11px;
   }
-  .h-sym { color: #8aa8cc; font-weight: 700; font-size: 11px; }
-  .h-lots { color: #4a6080; font-size: 10px; }
+  .h-sym { color: #8aa8cc; font-weight: 700; font-size: 12px; }
+  .h-lots { color: #4a6080; font-size: 11px; }
  
   .mover-item {
     display: flex; align-items: center; gap: 6px; padding: 5px 0;
-    border-bottom: 1px solid #0a1830; font-size: 11px;
+    border-bottom: 1px solid #0a1830; font-size: 12px;
   }
-  .mv-sym { color: #8aa8cc; font-weight: 700; width: 54px; flex-shrink: 0; }
+  .mv-sym { color: #8aa8cc; font-weight: 700; width: 62px; flex-shrink: 0; }
   .mv-bar { flex: 1; height: 3px; border-radius: 2px; opacity: 0.6; }
-  .mv-ch { font-size: 10px; font-weight: 700; width: 48px; text-align: right; flex-shrink: 0; }
+  .mv-ch { font-size: 11px; font-weight: 700; width: 48px; text-align: right; flex-shrink: 0; }
  
   .up { color: #00d68f; }
   .dn { color: #ff4560; }
@@ -277,14 +277,14 @@ const CSS = `
     font-family: 'Syne', sans-serif;
   }
   .ticker-tape { display: flex; gap: 24px; padding: 0 16px; overflow: hidden; }
-  .tape-item { display: flex; gap: 6px; align-items: center; font-size: 10px; flex-shrink: 0; }
-  /* FIX: 8px → 10px */
+  .tape-item { display: flex; gap: 6px; align-items: center; font-size: 11px; flex-shrink: 0; }
+  
   .tape-sym { color: #4a6080; font-family: 'Syne', sans-serif; font-size: 10px; font-weight: 700; }
  
   /* ── Trade form ── */
   .trade-input {
     width: 100%; background: #040d1a; border: 1px solid #0f2040; border-radius: 3px;
-    color: #c8d8f0; font-family: 'Space Mono', monospace; font-size: 11px;
+    color: #c8d8f0; font-family: 'Space Mono', monospace; font-size: 12px;
     padding: 6px 8px; outline: none; margin-bottom: 6px;
   }
   .trade-input:focus { border-color: #2e8fdf66; }
@@ -298,8 +298,8 @@ const CSS = `
   }
   .hm-cell:hover { opacity: 0.8; }
   /* FIX: 8px → 11px; 7px → 10px (WORST offenders) */
-  .hm-sym { font-size: 11px; font-weight: 700; color: #000a; }
-  .hm-ch  { font-size: 10px; color: #000a; }
+  .hm-sym { font-size: 10px; font-weight: 700; color: #000a; }
+  .hm-ch  { font-size: 9px; color: #000a; }
  
   /* ── Scrollbar ── */
   ::-webkit-scrollbar { width: 4px; }
@@ -576,6 +576,11 @@ export default function IDXTerminal() {
     const price = quotes[selectedTicker]?.price;
     if (!price) { setTradeMsg({ ok: false, message: "Harga belum tersedia" }); return; }
 
+    if (!tradeConfirm) {
+      setTradeConfirm(true);
+      return;
+    }
+
     const fn = tradeAction === "BUY" ? buy : sell;
     const res = await fn(selectedTicker, lots, price);
     setTradeMsg(res);
@@ -823,8 +828,9 @@ export default function IDXTerminal() {
                     <div key={g.label} style={{ background: "#070d1c", border: "1px solid #0f2040", borderRadius: 6, padding: 10 }}>
                       <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 8, letterSpacing: 2, color: "#2a4060", marginBottom: 8 }}>{g.label}</div>
                       {g.items.map(q => (
-                        <div key={q.ticker} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #0a1830" }}
-                          onClick={() => { setSelectedTicker(q.ticker); setPage("CHART"); }} style2={{ cursor: "pointer" }}>
+                        <div key={q.ticker} style={{ display: "flex", justifyContent: "space-between",
+                          padding: "4px 0", borderBottom: "1px solid #0a1830", cursor: "pointer" }}
+                          onClick={() => { setSelectedTicker(q.ticker); setPage("CHART"); }}>
                           <span style={{ fontSize: 10, color: "#8aa8cc" }}>{q.ticker.replace(".JK", "")}</span>
                           <span style={{ fontSize: 10, color: g.color, fontWeight: 700 }}>
                             {q.change_pct >= 0 ? "+" : ""}{q.change_pct.toFixed(2)}%
