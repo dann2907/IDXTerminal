@@ -576,11 +576,6 @@ export default function IDXTerminal() {
     const price = quotes[selectedTicker]?.price;
     if (!price) { setTradeMsg({ ok: false, message: "Harga belum tersedia" }); return; }
 
-    if (!tradeConfirm) {
-      setTradeConfirm(true);
-      return;
-    }
-
     const fn = tradeAction === "BUY" ? buy : sell;
     const res = await fn(selectedTicker, lots, price);
     setTradeMsg(res);
