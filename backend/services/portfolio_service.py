@@ -550,6 +550,20 @@ class PortfolioService:
         ]
 
     @staticmethod
+    async def get_pending_confirm_orders(
+        db: AsyncSession,
+    ) -> list[Order]:
+        """
+        Kembalikan semua order dengan status PENDING_CONFIRM.
+        Digunakan saat startup untuk re-broadcast order yang belum
+        dikonfirmasi user dari sesi sebelumnya.
+        """
+        result = await db.execute(
+            select(Order).where(Order.status == "PENDING_CONFIRM")
+        )
+        return result.scalars().all()
+
+    @staticmethod
     async def get_active_orders_for_check(
         db: AsyncSession,
     ) -> list[Order]:

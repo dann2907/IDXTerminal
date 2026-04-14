@@ -238,6 +238,30 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       const q = status ? `?status=${status}` : "";
       const data = await apiFetch<PortfolioOrder[]>(`/orders${q}`);
       set({ orders: data });
+
+      // FIX: Jika ada order PENDING_CONFIRM dari sesi sebelumnya,
+      // tampilkan dialog konfirmasi otomatis.
+      if (!status || status === "PENDING_CONFIRM") {
+        const pending = data.find(o => o.status === "PENDING_CONFIRM");
+        if (pending) {
+          const existing = get().pendingOrderEvent;
+          if (!existing || existing.order_id !== pending.order_id) {
+            set({
+              pendingOrderEvent: {
+                order_id: pending.order_id,
+                ticker: pending.ticker,
+                order_type: pending.order_type,
+                trigger_price: pending.trigger_price,
+                current_price: pending.trigger_price, // akan di-update oleh WS
+                lots: pending.lots,
+                shares: pending.shares,
+                symbol: "Rp",
+                message: `${pending.order_type} order untuk ${pending.ticker} terpicu. Eksekusi sekarang?`,
+              },
+            });
+          }
+        }
+      }
     } catch (e) {
       console.error("[portfolio] fetchOrders:", e);
     } finally {

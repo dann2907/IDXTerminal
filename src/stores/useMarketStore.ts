@@ -46,6 +46,8 @@ type WsStatus = "connecting" | "connected" | "disconnected" | "error";
 interface MarketState {
   quotes: Record<string, QuoteData>;
   candles: Record<string, CandleData[]>;
+  candleLoading: Record<string, boolean>;
+  candleError: Record<string, string | null>;
   wsStatus: WsStatus;
 
   getQuote: (ticker: string) => QuoteData | undefined;
@@ -73,8 +75,8 @@ const API_BASE = "http://127.0.0.1:8765";
 export const useMarketStore = create<MarketState>((set, get) => ({
   quotes: {},
   candles: {},
-  candleLoading: {}, 
-  candleError:   {},   
+  candleLoading: {},
+  candleError:   {},
   wsStatus: "disconnected",
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -162,7 +164,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
   // ── Candles ───────────────────────────────────────────────────────────────
 
-  async fetchCandles(ticker, period = "3mo", interval = "1d") {
+  async fetchCandles(ticker: string, period: string = "3mo", interval: string = "1d") {
     const t = ticker.toUpperCase().endsWith(".JK")
       ? ticker.toUpperCase()
       : `${ticker.toUpperCase()}.JK`;
@@ -180,16 +182,21 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as { candles: CandleData[] };
       set(state => ({
-        candles: { ...state.candles, [t]: json.candles },
+        candles:       { ...state.candles,       [t]: json.candles },
+        candleLoading: { ...state.candleLoading, [t]: false },
       }));
     } catch (err) {
       console.error("[useMarketStore] fetchCandles error:", err);
+      set(state => ({
+        candleLoading: { ...state.candleLoading, [t]: false },
+        candleError:   { ...state.candleError,   [t]: (err as Error).message },
+      }));
     }
   },
 
   // ── Search ────────────────────────────────────────────────────────────────
 
-  async searchTicker(query) {
+  async searchTicker(query: string) {
     const t = query.toUpperCase().endsWith(".JK")
       ? query.toUpperCase()
       : `${query.toUpperCase()}.JK`;
@@ -197,6 +204,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       const res = await fetch(`${API_BASE}/api/market/search/${t}`);
       if (!res.ok) return null;
       const json = await res.json() as { ticker: string; price?: number; name?: string };
+      if (!json?.ticker) return null;
       const existing = get().quotes[json.ticker];
       return existing ?? null;
     } catch (err) {
