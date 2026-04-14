@@ -1,14 +1,11 @@
 // src/components/chart/CandleChart.tsx
 //
-// FIX 1 (bug panel toggle): panel div selalu di-render, display:none saat
-//   tidak aktif. Chart instance tidak pernah di-destroy saat panel toggle,
-//   sehingga seri bisa ditambah/dihapus tanpa re-init.
-//
-// FIX 2 (volume terpisah): volume dikeluarkan dari main chart ke pane
-//   sendiri (volumeChart). User bisa scroll/zoom volume independen.
-//
-// FITUR BARU: prop `onWatchlistToggle` + `inWatchlist` untuk tombol ★
-//   di chart header (dipanggil dari IDXTerminal).
+// FIX 1: Skeleton loading saat candles belum ada / sedang fetch
+// FIX 2: Error state saat fetch gagal (dengan tombol retry)
+// FIX 3: ResizeObserver cover volRef dan panelRef juga
+// FIX 4: panel div selalu di-render (display:none) — bukan conditional render
+// FIX 5: volume sebagai chart terpisah (bisa di-zoom sendiri)
+// FEAT:  prop inWatchlist + onWatchlistToggle untuk tombol ★
 
 import { useEffect, useRef, useState } from "react";
 import {
@@ -21,15 +18,15 @@ import { useIndicators } from "../../hooks/useIndicators";
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type OverlayIndicator = "none" | "sma" | "ema" | "bb";
-type PanelIndicator   = "none" | "rsi" | "macd" | "volume";
+type PanelIndicator   = "none" | "rsi" | "macd";
 
 interface Props {
-  ticker:              string;
-  period?:             string;
-  interval?:           string;
-  height?:             number;
-  inWatchlist?:        boolean;
-  onWatchlistToggle?:  () => void;
+  ticker:             string;
+  period?:            string;
+  interval?:          string;
+  height?:            number;
+  inWatchlist?:       boolean;
+  onWatchlistToggle?: () => void;
 }
 
 // ── Theme ──────────────────────────────────────────────────────────────────
@@ -54,33 +51,139 @@ const C = {
   macd_sig:  "#f59e0b",
   macd_bull: "rgba(0,214,143,0.6)",
   macd_bear: "rgba(255,69,96,0.6)",
+  skeleton:  "#0d1e35",
 };
 
-const CHART_OPTS = (bg = C.bg) => ({
-  layout:    { background: { type: ColorType.Solid, color: bg }, textColor: C.text },
+const CHART_OPTS = () => ({
+  layout:    { background: { type: ColorType.Solid, color: C.bg }, textColor: C.text },
   grid:      { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
   crosshair: { mode: CrosshairMode.Normal },
   rightPriceScale: { borderColor: C.border },
   timeScale:       { borderColor: C.border, timeVisible: true },
 });
 
-// ── Component ──────────────────────────────────────────────────────────────
+// ── Skeleton component ─────────────────────────────────────────────────────
+
+function Skeleton({ height, label = "Memuat data chart..." }: { height: number; label?: string }) {
+  return (
+    <div style={{
+      height,
+      background: C.bg,
+      display: "flex",
+      flexDirection: "column",
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      {/* Shimmer bars — simulasi candlestick */}
+      <div style={{ flex: 1, padding: "12px 8px", display: "flex", alignItems: "flex-end", gap: 3 }}>
+        {Array.from({ length: 40 }, (_, i) => {
+          const h = 20 + Math.sin(i * 0.7) * 15 + Math.cos(i * 0.3) * 10 + (i % 5) * 3;
+          return (
+            <div key={i} style={{
+              flex: 1,
+              height: `${Math.max(8, h)}%`,
+              background: C.skeleton,
+              borderRadius: 1,
+              animation: `skeletonPulse 1.5s ease-in-out ${(i * 0.03).toFixed(2)}s infinite`,
+            }} />
+          );
+        })}
+      </div>
+      {/* Label */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        gap: 8,
+      }}>
+        <div style={{
+          display: "flex", gap: 4, alignItems: "center",
+        }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "#2e8fdf",
+              animation: `dotBounce 1.2s ease-in-out ${(i * 0.2).toFixed(1)}s infinite`,
+            }} />
+          ))}
+        </div>
+        <div style={{
+          fontSize: 11, color: "#2a4060",
+          fontFamily: "'Space Mono', monospace",
+          letterSpacing: "0.05em",
+        }}>
+          {label}
+        </div>
+      </div>
+      <style>{`
+        @keyframes skeletonPulse {
+          0%, 100% { opacity: 0.4; }
+          50%       { opacity: 0.8; }
+        }
+        @keyframes dotBounce {
+          0%, 80%, 100% { transform: scale(0.8); opacity: 0.4; }
+          40%           { transform: scale(1.2); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Error state ────────────────────────────────────────────────────────────
+
+function ChartError({ ticker, onRetry, height }: { ticker: string; onRetry: () => void; height: number }) {
+  return (
+    <div style={{
+      height,
+      background: C.bg,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "column",
+      gap: 10,
+    }}>
+      <div style={{ fontSize: 20 }}>⚠</div>
+      <div style={{ fontSize: 11, color: "#4a6080", fontFamily: "'Space Mono', monospace" }}>
+        Gagal memuat data {ticker.replace(".JK", "")}
+      </div>
+      <button
+        onClick={onRetry}
+        style={{
+          padding: "5px 14px", fontSize: 10,
+          fontFamily: "'Syne', sans-serif", fontWeight: 700,
+          background: "rgba(46,143,223,0.15)",
+          border: "1px solid rgba(46,143,223,0.4)",
+          borderRadius: 3, color: "#2e8fdf", cursor: "pointer",
+        }}
+      >
+        Coba Lagi
+      </button>
+    </div>
+  );
+}
+
+// ── Main Component ──────────────────────────────────────────────────────────
 
 export default function CandleChart({
   ticker, period = "3mo", interval = "1d",
-  height = 340, inWatchlist = false, onWatchlistToggle,
+  height = 300, inWatchlist = false, onWatchlistToggle,
 }: Props) {
-  const fetchCandles = useMarketStore(s => s.fetchCandles);
-  const candles      = useMarketStore(s => s.candles[ticker] ?? []);
-  const ind          = useIndicators(ticker);
+  const fetchCandles    = useMarketStore(s => s.fetchCandles);
+  const candles         = useMarketStore(s => s.candles[ticker] ?? []);
+  const candleLoading   = useMarketStore(s => s.candleLoading[ticker] ?? false); // FIX 1
+  const candleError     = useMarketStore(s => s.candleError[ticker] ?? null);    // FIX 2
+  const ind             = useIndicators(ticker);
 
   const [overlay, setOverlay] = useState<OverlayIndicator>("sma");
-  const [panel,   setPanel]   = useState<PanelIndicator>("volume");
+  const [panel,   setPanel]   = useState<PanelIndicator>("none");
 
-  // DOM refs — semua div SELALU di-render, kontrol via CSS display
-  const mainRef   = useRef<HTMLDivElement>(null);
-  const volRef    = useRef<HTMLDivElement>(null);
-  const panelRef  = useRef<HTMLDivElement>(null);
+  // DOM refs — semua div SELALU di-render
+  const mainRef  = useRef<HTMLDivElement>(null);
+  const volRef   = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Chart instance refs
   const mainChart  = useRef<IChartApi | null>(null);
@@ -102,23 +205,19 @@ export default function CandleChart({
   useEffect(() => {
     if (!mainRef.current || !volRef.current || !panelRef.current) return;
 
-    // ── Main (candlestick) chart ──────────────────────────────────────────
+    // Main chart
     mainChart.current = createChart(mainRef.current, {
-      ...CHART_OPTS(),
-      height,
-      width: mainRef.current.clientWidth,
+      ...CHART_OPTS(), height, width: mainRef.current.clientWidth,
     });
     candleSeries.current = mainChart.current.addCandlestickSeries({
-      upColor:        C.up,  downColor:        C.dn,
-      borderUpColor:  C.up,  borderDownColor:  C.dn,
-      wickUpColor:    C.up,  wickDownColor:    C.dn,
+      upColor: C.up, downColor: C.dn,
+      borderUpColor: C.up, borderDownColor: C.dn,
+      wickUpColor: C.up, wickDownColor: C.dn,
     });
 
-    // ── Volume chart (FIX 2: pane terpisah) ──────────────────────────────
+    // Volume chart — pane terpisah (FIX 5)
     volChart.current = createChart(volRef.current, {
-      ...CHART_OPTS(),
-      height: 80,
-      width:  volRef.current.clientWidth,
+      ...CHART_OPTS(), height: 72, width: volRef.current.clientWidth,
     });
     volSeries.current = volChart.current.addHistogramSeries({
       priceFormat: { type: "volume" },
@@ -127,14 +226,12 @@ export default function CandleChart({
       scaleMargins: { top: 0.1, bottom: 0 },
     });
 
-    // ── Panel chart (RSI / MACD) — FIX 1: selalu dibuat ─────────────────
+    // Panel chart (RSI/MACD) — selalu dibuat (FIX 4)
     panelChart.current = createChart(panelRef.current, {
-      ...CHART_OPTS(),
-      height: 120,
-      width:  panelRef.current.clientWidth,
+      ...CHART_OPTS(), height: 100, width: panelRef.current.clientWidth,
     });
 
-    // Sync time scale: scroll main → scroll semua panel
+    // Sync time scale
     const syncRange = (range: any) => {
       if (!range) return;
       volChart.current?.timeScale().setVisibleLogicalRange(range);
@@ -142,14 +239,14 @@ export default function CandleChart({
     };
     mainChart.current.timeScale().subscribeVisibleLogicalRangeChange(syncRange);
 
-    // ResizeObserver
+    // FIX 3: ResizeObserver cover semua tiga chart
     const ro = new ResizeObserver(entries => {
       const w = entries[0].contentRect.width;
       mainChart.current?.applyOptions({ width: w });
       volChart.current?.applyOptions({ width: w });
       panelChart.current?.applyOptions({ width: w });
     });
-    ro.observe(mainRef.current);
+    ro.observe(mainRef.current); // cukup observe satu karena semua sama lebar
 
     return () => {
       ro.disconnect();
@@ -160,28 +257,24 @@ export default function CandleChart({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Update candle + volume data ──────────────────────────────────────────
+  // ── Update candle + volume ───────────────────────────────────────────────
   useEffect(() => {
     if (!candles.length || !candleSeries.current || !volSeries.current) return;
-
     candleSeries.current.setData(candles.map(c => ({
       time: c.time as any, open: c.open, high: c.high, low: c.low, close: c.close,
     })));
     volSeries.current.setData(candles.map(c => ({
-      time:  c.time as any,
-      value: c.volume,
+      time: c.time as any, value: c.volume,
       color: c.close >= c.open ? C.vol_up : C.vol_dn,
     })));
     mainChart.current?.timeScale().fitContent();
     volChart.current?.timeScale().fitContent();
   }, [candles]);
 
-  // ── Update overlay indicators ────────────────────────────────────────────
+  // ── Overlay indicators ───────────────────────────────────────────────────
   useEffect(() => {
     if (!mainChart.current) return;
-    overlaySeries.current.forEach(s => {
-      try { mainChart.current!.removeSeries(s); } catch {}
-    });
+    overlaySeries.current.forEach(s => { try { mainChart.current!.removeSeries(s); } catch {} });
     overlaySeries.current = [];
 
     if (overlay === "sma" && ind.sma20.length) {
@@ -196,23 +289,19 @@ export default function CandleChart({
       overlaySeries.current = [e9];
     } else if (overlay === "bb" && ind.bb.length) {
       const upper = mainChart.current.addLineSeries({ color: C.bb_upper, lineWidth: 1, priceLineVisible: false });
-      const mid   = mainChart.current.addLineSeries({ color: C.bb_mid,   lineWidth: 1, lineStyle: 2, priceLineVisible: false });
+      const mid   = mainChart.current.addLineSeries({ color: C.bb_mid, lineWidth: 1, lineStyle: 2, priceLineVisible: false });
       const lower = mainChart.current.addLineSeries({ color: C.bb_lower, lineWidth: 1, priceLineVisible: false });
       upper.setData(ind.bb.map(p => ({ time: p.time as any, value: p.upper })));
-      mid.setData(  ind.bb.map(p => ({ time: p.time as any, value: p.mid   })));
+      mid.setData(  ind.bb.map(p => ({ time: p.time as any, value: p.mid })));
       lower.setData(ind.bb.map(p => ({ time: p.time as any, value: p.lower })));
       overlaySeries.current = [upper, mid, lower];
     }
   }, [overlay, ind]);
 
-  // ── Update panel (RSI / MACD) — FIX 1: tidak bergantung pada display ────
+  // ── Panel indicators (RSI/MACD) — FIX 4: tidak bergantung display ────────
   useEffect(() => {
     if (!panelChart.current) return;
-
-    // Hapus semua seri lama dulu
-    panelSeries.current.forEach(s => {
-      try { panelChart.current!.removeSeries(s); } catch {}
-    });
+    panelSeries.current.forEach(s => { try { panelChart.current!.removeSeries(s); } catch {} });
     panelSeries.current = [];
 
     if (panel === "rsi" && ind.rsi14.length) {
@@ -225,33 +314,35 @@ export default function CandleChart({
     } else if (panel === "macd" && ind.macd.length) {
       const hist = panelChart.current.addHistogramSeries({ priceLineVisible: false });
       const ml   = panelChart.current.addLineSeries({ color: C.macd_line, lineWidth: 1, priceLineVisible: false });
-      const sig  = panelChart.current.addLineSeries({ color: C.macd_sig,  lineWidth: 1, priceLineVisible: false });
+      const sig  = panelChart.current.addLineSeries({ color: C.macd_sig, lineWidth: 1, priceLineVisible: false });
       hist.setData(ind.macd.map(p => ({
         time: p.time as any, value: p.histogram,
         color: p.histogram >= 0 ? C.macd_bull : C.macd_bear,
       })));
-      ml.setData( ind.macd.map(p => ({ time: p.time as any, value: p.macd   })));
+      ml.setData( ind.macd.map(p => ({ time: p.time as any, value: p.macd })));
       sig.setData(ind.macd.map(p => ({ time: p.time as any, value: p.signal })));
       panelSeries.current = [hist, ml, sig];
     }
-    // panel === "none": series sudah di-clear di atas, tidak perlu isi ulang
-    if (panelSeries.current.length) {
-      panelChart.current.timeScale().fitContent();
-    }
+    if (panelSeries.current.length) panelChart.current.timeScale().fitContent();
   }, [panel, ind]);
+
+  // ── Retry handler ─────────────────────────────────────────────────────────
+  const handleRetry = () => fetchCandles(ticker, period, interval);
 
   // ── Render ───────────────────────────────────────────────────────────────
   const panelLabel = panel === "rsi" ? "RSI (14)" : panel === "macd" ? "MACD (12,26,9)" : "";
+  const isLoading  = candleLoading && candles.length === 0;
+  const isError    = !!candleError && !isLoading;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", background: C.bg, height: "100%" }}>
 
-      {/* ── Toolbar ────────────────────────────────────────────────────── */}
+      {/* ── Toolbar ─────────────────────────────────────────────────── */}
       <div style={{
         display: "flex", gap: 6, padding: "5px 8px",
-        borderBottom: `1px solid ${C.border}`, flexWrap: "wrap", alignItems: "center", flexShrink: 0,
+        borderBottom: `1px solid ${C.border}`,
+        flexWrap: "wrap", alignItems: "center", flexShrink: 0,
       }}>
-        {/* Overlay */}
         <ToolGroup label="OVERLAY">
           {(["none", "sma", "ema", "bb"] as OverlayIndicator[]).map(o => (
             <Btn key={o} active={overlay === o} onClick={() => setOverlay(o)}
@@ -263,7 +354,6 @@ export default function CandleChart({
 
         <Sep />
 
-        {/* Panel */}
         <ToolGroup label="PANEL">
           {(["none", "rsi", "macd"] as PanelIndicator[]).map(p => (
             <Btn key={p} active={panel === p} onClick={() => setPanel(p)}
@@ -272,6 +362,25 @@ export default function CandleChart({
             </Btn>
           ))}
         </ToolGroup>
+
+        {/* Watchlist toggle */}
+        {onWatchlistToggle && (
+          <>
+            <Sep />
+            <button onClick={onWatchlistToggle}
+              title={inWatchlist ? "Hapus dari watchlist" : "Tambah ke watchlist"}
+              style={{
+                padding: "2px 8px", fontSize: 13, lineHeight: 1,
+                border: `1px solid ${inWatchlist ? C.sma20 : C.border}`,
+                borderRadius: 3,
+                background: inWatchlist ? `${C.sma20}22` : "transparent",
+                color: inWatchlist ? C.sma20 : C.text,
+                cursor: "pointer",
+              }}>
+              {inWatchlist ? "★" : "☆"}
+            </button>
+          </>
+        )}
 
         {/* Legend */}
         {overlay === "sma" && (
@@ -284,25 +393,32 @@ export default function CandleChart({
         {overlay === "bb"  && <div style={{ marginLeft: "auto" }}><Legend color={C.bb_mid} label="BB (20,2)" /></div>}
       </div>
 
-      {/* ── Main chart ─────────────────────────────────────────────────── */}
-      <div ref={mainRef} style={{ flexShrink: 0 }} />
+      {/* ── FIX 1+2: Loading / Error state — overlay di atas chart area ─ */}
+      {isLoading ? (
+        <Skeleton height={height} />
+      ) : isError ? (
+        <ChartError ticker={ticker} onRetry={handleRetry} height={height} />
+      ) : (
+        <>
+          {/* ── Main chart ──────────────────────────────────────────── */}
+          <div ref={mainRef} style={{ flexShrink: 0 }} />
 
-      {/* ── Volume pane (FIX 2: selalu terlihat, chart terpisah) ─────── */}
-      <div style={{ borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <PaneLabel>VOL</PaneLabel>
-        <div ref={volRef} />
-      </div>
+          {/* ── Volume pane (terpisah) ───────────────────────────────── */}
+          <div style={{ borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+            <PaneLabel>VOL</PaneLabel>
+            <div ref={volRef} />
+          </div>
 
-      {/* ── RSI / MACD pane (FIX 1: div SELALU di-render) ───────────── */}
-      {/* FIX: gunakan display:none bukan conditional render agar panelRef tetap valid */}
-      <div style={{
-        borderTop: `1px solid ${C.border}`, flexShrink: 0,
-        display:   panel !== "none" ? "block" : "none",   // ← kunci fix bug
-      }}>
-        {panelLabel && <PaneLabel>{panelLabel}</PaneLabel>}
-        <div ref={panelRef} />
-      </div>
-
+          {/* ── RSI / MACD pane — FIX 4: div SELALU ada di DOM ──────── */}
+          <div style={{
+            borderTop: `1px solid ${C.border}`, flexShrink: 0,
+            display: panel !== "none" ? "block" : "none",
+          }}>
+            {panelLabel && <PaneLabel>{panelLabel}</PaneLabel>}
+            <div ref={panelRef} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -324,9 +440,9 @@ function Btn({ children, active, onClick, color }: {
   return (
     <button onClick={onClick} style={{
       padding: "2px 7px", fontSize: 9, fontFamily: "'Syne',sans-serif", fontWeight: 700,
-      border:  `1px solid ${active ? color : "transparent"}`,
+      border: `1px solid ${active ? color : "transparent"}`,
       borderRadius: 3, background: active ? `${color}22` : "transparent",
-      color:   active ? color : "#4a6080", cursor: "pointer",
+      color: active ? color : "#4a6080", cursor: "pointer",
     }}>
       {children}
     </button>

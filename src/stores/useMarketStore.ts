@@ -73,6 +73,8 @@ const API_BASE = "http://127.0.0.1:8765";
 export const useMarketStore = create<MarketState>((set, get) => ({
   quotes: {},
   candles: {},
+  candleLoading: {}, 
+  candleError:   {},   
   wsStatus: "disconnected",
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -164,6 +166,13 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     const t = ticker.toUpperCase().endsWith(".JK")
       ? ticker.toUpperCase()
       : `${ticker.toUpperCase()}.JK`;
+
+    set(state => ({
+      candles:       { ...state.candles,       [t]: [] },
+      candleLoading: { ...state.candleLoading, [t]: true },
+      candleError:   { ...state.candleError,   [t]: null },
+    }));
+
     try {
       const res = await fetch(
         `${API_BASE}/api/market/candles/${t}?period=${period}&interval=${interval}`
