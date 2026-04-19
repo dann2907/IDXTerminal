@@ -1,6 +1,5 @@
 // src/components/chart/CandleChart.tsx
 //
-// FIX 1: Skeleton loading saat candles belum ada / sedang fetch
 // FIX 2: Error state saat fetch gagal (dengan tombol retry)
 // FIX 3: ResizeObserver cover volRef dan panelRef juga
 // FIX 4: panel div selalu di-render (display:none) — bukan conditional render
