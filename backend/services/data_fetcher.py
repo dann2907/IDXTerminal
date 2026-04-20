@@ -52,20 +52,28 @@ _IDX_SESSIONS: dict[int, list[tuple[int, int, int, int]]] = {
 }
 
 # ── IDX API constants ─────────────────────────────────────────────────────────
-_IDX_SUMMARY_URL = (
-    "https://www.idx.co.id/umbraco/Surface/StockData/GetStockSummary"
-)
-_IDX_SNAPSHOT_URL = (
+_IDX_SUMMARY_URL = "https://www.idx.co.id/umbraco/Surface/StockData/GetStockSummary"
+_IDX_SNAPSHOT_URL = "https://www.idx.co.id/primary/Home/GetTradeSummary?lang=id"
+_IDX_SNAPSHOT_FALLBACK_URL = (
     "https://www.idx.co.id/umbraco/Surface/StockData/GetSecuritiesStock"
 )
 _IDX_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Chrome/147.0.0.0 Safari/537.36"
     ),
-    "Referer": "https://www.idx.co.id/",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.7",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Referer": "https://www.idx.co.id/id",
+    "Origin": "https://www.idx.co.id",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-GPC": "1",
+    "egrum": "isAjax:true",
 }
 _IDX_TIMEOUT    = aiohttp.ClientTimeout(total=15)  # snapshot lebih besar, naikkan timeout
 _IDX_BATCH_DELAY = 0.35   # detik antar ticker, masih dipakai oleh fallback per-ticker
@@ -236,8 +244,27 @@ class DataFetcher:
             len(results), len(tickers), len(missing),
         )
 
+        if not results and missing:
+            logger.info(
+                "IDX snapshot kosong; mencoba fallback per-ticker IDX untuk %d ticker",
+                len(missing),
+            )
+            idx_recovered: list[str] = []
+            for ticker in list(missing):
+                quote = await self._fetch_idx(ticker)
+                if quote:
+                    results[ticker] = quote
+                    idx_recovered.append(ticker)
+                await asyncio.sleep(_IDX_BATCH_DELAY)
+            if idx_recovered:
+                missing = [ticker for ticker in missing if ticker not in results]
+                logger.info(
+                    "IDX per-ticker fallback recovered %d ticker",
+                    len(idx_recovered),
+                )
+
         # Fallback yfinance untuk ticker yang tidak ada di snapshot IDX
-        # (saham baru listing, warrant, ETF non-IDX, dll)
+        # atau tetap gagal di endpoint per-ticker.
         for ticker in missing:
             quote = await self._fetch_yfinance(ticker)
             if quote:
@@ -246,6 +273,46 @@ class DataFetcher:
                 logger.warning("No data for %s (IDX miss + yfinance fail)", ticker)
 
         return results
+
+    async def _request_idx_payload(
+        self,
+        url: str,
+        label: str,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> object | None:
+        """Request helper dengan logging yang lebih jelas saat IDX menolak."""
+        assert self._session is not None
+        try:
+            async with self._session.get(url, params=params) as resp:
+                body = await resp.text()
+                if resp.status != 200:
+                    snippet = " ".join(body.split())[:180]
+                    logger.warning(
+                        "%s HTTP %d | url=%s | body=%s",
+                        label,
+                        resp.status,
+                        str(resp.url),
+                        snippet or "<empty>",
+                    )
+                    return None
+                try:
+                    return await resp.json(content_type=None)
+                except Exception:
+                    snippet = " ".join(body.split())[:180]
+                    logger.warning(
+                        "%s non-JSON response | url=%s | body=%s",
+                        label,
+                        str(resp.url),
+                        snippet or "<empty>",
+                    )
+                    return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error("%s request failed: %s", label, exc)
+            return None
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("%s unexpected error: %s", label, exc)
+            return None
 
     async def _fetch_all_yfinance(
         self, tickers: set[str]
@@ -270,26 +337,34 @@ class DataFetcher:
         Return dict ticker → QuoteData.
         Return {} jika request gagal — caller akan fallback ke yfinance.
         """
-        assert self._session is not None
-        try:
-            async with self._session.get(_IDX_SNAPSHOT_URL) as resp:
-                if resp.status != 200:
-                    logger.warning("IDX snapshot HTTP %d", resp.status)
-                    return {}
-                raw = await resp.json(content_type=None)
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            logger.error("IDX snapshot request failed: %s", exc)
-            return {}
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.error("IDX snapshot unexpected error: %s", exc)
+        raw = await self._request_idx_payload(_IDX_SNAPSHOT_URL, "IDX snapshot")
+        if raw is None:
+            raw = await self._request_idx_payload(
+                _IDX_SNAPSHOT_FALLBACK_URL,
+                "IDX snapshot fallback",
+            )
+        if raw is None:
             return {}
 
-        rows = raw if isinstance(raw, list) else raw.get("data", raw.get("Data", []))
+        rows = _extract_idx_rows(raw)
+        if not rows:
+            logger.warning(
+                "IDX snapshot payload tidak berisi rows yang dikenali (type=%s)",
+                type(raw).__name__,
+            )
+            return {}
+
         results: dict[str, QuoteData] = {}
         skipped = 0
 
         for row in rows:
             try:
+                quote = _parse_idx_row(row)
+                if quote is None:
+                    skipped += 1
+                    continue
+                results[quote.ticker] = quote
+                continue
                 # StockCode adalah field utama di GetSecuritiesStock
                 code = (
                     row.get("StockCode") or row.get("Code") or row.get("code") or ""
@@ -354,6 +429,15 @@ class DataFetcher:
         """
         code = ticker_jk.upper().replace(".JK", "")
         params = {"StockCode": code}
+        raw = await self._request_idx_payload(
+            _IDX_SUMMARY_URL,
+            f"IDX summary {code}",
+            params=params,
+        )
+        if raw is None:
+            return None
+        return _parse_idx_response(ticker_jk, raw)
+
         try:
             assert self._session is not None
             async with self._session.get(
@@ -408,23 +492,28 @@ class DataFetcher:
 
 # ── Parsers (modul-level, bukan method, mudah di-test) ───────────────────────
 
-def _parse_idx_response(ticker_jk: str, raw: dict) -> QuoteData | None:
+def _parse_idx_response(ticker_jk: str, raw: object) -> QuoteData | None:
     """
     Parse respons JSON dari IDX API.
     Kembalikan None jika field penting kosong/nol.
     """
+    if not isinstance(raw, dict):
+        logger.debug("IDX parse error for %s: payload bukan dict | raw=%s", ticker_jk, raw)
+        return None
+
     try:
-        price = float(raw.get("LastPrice") or 0)
+        normalized = _normalize_idx_record(raw)
+        price = float(normalized.get("LastPrice") or 0)
         if price <= 0:
             return None
 
-        prev_close = float(raw.get("PreviousPrice") or price)
-        open_ = float(raw.get("OpenPrice") or price)
-        high = float(raw.get("HighPrice") or price)
-        low = float(raw.get("LowPrice") or price)
+        prev_close = float(normalized.get("PreviousPrice") or price)
+        open_ = float(normalized.get("OpenPrice") or price)
+        high = float(normalized.get("HighPrice") or price)
+        low = float(normalized.get("LowPrice") or price)
 
         # Volume dari IDX kadang dalam satuan lot, kalikan 100
-        raw_vol = raw.get("Volume") or 0
+        raw_vol = normalized.get("Volume") or 0
         volume = int(float(raw_vol))
 
         return QuoteData(
@@ -440,6 +529,91 @@ def _parse_idx_response(ticker_jk: str, raw: dict) -> QuoteData | None:
     except (TypeError, ValueError, KeyError) as exc:
         logger.debug("IDX parse error for %s: %s | raw=%s", ticker_jk, exc, raw)
         return None
+
+
+def _extract_idx_rows(raw: object) -> list[dict]:
+    """Coba beberapa bentuk payload IDX yang sering berubah antar endpoint."""
+    if isinstance(raw, list):
+        return [row for row in raw if isinstance(row, dict)]
+
+    if not isinstance(raw, dict):
+        return []
+
+    direct_keys = (
+        "data",
+        "Data",
+        "Results",
+        "results",
+        "Table",
+        "table",
+        "List",
+        "list",
+        "Stocks",
+        "stocks",
+    )
+    for key in direct_keys:
+        rows = raw.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+
+    for value in raw.values():
+        if isinstance(value, list) and all(isinstance(row, dict) for row in value):
+            return value
+        if isinstance(value, dict):
+            nested = _extract_idx_rows(value)
+            if nested:
+                return nested
+
+    return []
+
+
+def _normalize_idx_record(raw: dict) -> dict[str, object]:
+    """Samakan beberapa nama field dari endpoint IDX yang berbeda."""
+    return {
+        "StockCode": (
+            raw.get("StockCode")
+            or raw.get("Code")
+            or raw.get("code")
+            or raw.get("Ticker")
+            or raw.get("ticker")
+            or raw.get("Symbol")
+            or raw.get("symbol")
+            or ""
+        ),
+        "LastPrice": (
+            raw.get("LastPrice")
+            or raw.get("Close")
+            or raw.get("close")
+            or raw.get("Last")
+            or raw.get("last")
+            or raw.get("Price")
+            or raw.get("price")
+            or 0
+        ),
+        "PreviousPrice": (
+            raw.get("PreviousPrice")
+            or raw.get("Previous")
+            or raw.get("Prev")
+            or raw.get("prev")
+            or raw.get("previousPrice")
+            or 0
+        ),
+        "OpenPrice": raw.get("OpenPrice") or raw.get("Open") or raw.get("open") or 0,
+        "HighPrice": raw.get("HighPrice") or raw.get("High") or raw.get("high") or 0,
+        "LowPrice": raw.get("LowPrice") or raw.get("Low") or raw.get("low") or 0,
+        "Volume": raw.get("Volume") or raw.get("volume") or raw.get("Vol") or raw.get("vol") or 0,
+    }
+
+
+def _parse_idx_row(raw: dict) -> QuoteData | None:
+    """Parse satu row snapshot IDX yang field-nya bisa berubah antar endpoint."""
+    normalized = _normalize_idx_record(raw)
+    code = str(normalized.get("StockCode") or "").strip().upper()
+    if not code:
+        return None
+
+    ticker = f"{code}.JK"
+    return _parse_idx_response(ticker, normalized)
 
 
 def _blocking_yfinance(ticker_jk: str) -> QuoteData | None:
