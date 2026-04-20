@@ -9,6 +9,12 @@
 #
 # Jika send ke client gagal (koneksi mati tiba-tiba), client
 # langsung dikeluarkan dari set — tidak crash loop.
+#
+# FIX BUG-A: get_snapshot() sekarang return deep copy per-ticker.
+#   Sebelumnya dict(self._cache) hanya shallow copy — caller bisa
+#   secara tidak sengaja memutasi inner dict dan merusak cache harga.
+#   Contoh bug: alert_checker memodifikasi nilai snapshot → harga
+#   di cache berubah → broadcast berikutnya kirim harga yang salah.
 
 import asyncio
 import logging
@@ -41,8 +47,21 @@ class WSBroadcaster:
             self._cache[ticker] = quote.to_dict()
 
     def get_snapshot(self) -> dict:
-        """Kembalikan seluruh cache sebagai dict (untuk snapshot awal client)."""
-        return dict(self._cache)
+        """
+        Kembalikan seluruh cache sebagai dict (untuk snapshot awal client).
+
+        FIX BUG-A: Return DEEP COPY per-ticker agar caller tidak bisa
+        memutasi cache secara tidak sengaja.
+        dict(self._cache) hanya shallow copy — nilai dict (inner dict)
+        masih shared reference, sehingga:
+          snap = broadcaster.get_snapshot()
+          snap["BBCA.JK"]["price"] = 9999  ← ini juga mengubah self._cache!
+
+        Solusi: copy setiap inner dict secara eksplisit.
+        Tidak perlu copy.deepcopy penuh karena inner dict hanya berisi
+        primitif (str, float, int, bool) — dict(v) sudah cukup.
+        """
+        return {ticker: dict(quote) for ticker, quote in self._cache.items()}
 
     # ── Connection management ─────────────────────────────────────────────────
 

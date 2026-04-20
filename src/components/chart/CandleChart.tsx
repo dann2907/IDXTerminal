@@ -1,5 +1,11 @@
 // src/components/chart/CandleChart.tsx
 //
+// FIX BUG-1: Chart divs selalu ada di DOM (display:none saat loading/error).
+//   Root cause sebelumnya: conditional rendering {isLoading ? <Skeleton> : <div ref>}
+//   menyebabkan mainRef.current=null saat chart init useEffect berjalan,
+//   sehingga chart tidak pernah terbuat. Solusi: render semua div selalu,
+//   overlay skeleton/error di atasnya dengan position:absolute.
+//
 // FIX 2: Error state saat fetch gagal (dengan tombol retry)
 // FIX 3: ResizeObserver cover volRef dan panelRef juga
 // FIX 4: panel div selalu di-render (display:none) — bukan conditional render
@@ -61,17 +67,22 @@ const CHART_OPTS = () => ({
   timeScale:       { borderColor: C.border, timeVisible: true },
 });
 
-// ── Skeleton component ─────────────────────────────────────────────────────
+// ── Skeleton overlay ───────────────────────────────────────────────────────
+// Dirender sebagai overlay position:absolute di atas chart, bukan
+// menggantikan DOM node chart — sehingga chart divs tetap terpasang.
 
-function Skeleton({ height, label = "Memuat data chart..." }: { height: number; label?: string }) {
+function SkeletonOverlay({ height, label = "Memuat data chart..." }: { height: number; label?: string }) {
   return (
     <div style={{
+      position: "absolute",
+      inset: 0,
+      zIndex: 10,
       height,
       background: C.bg,
       display: "flex",
       flexDirection: "column",
-      position: "relative",
       overflow: "hidden",
+      pointerEvents: "none",
     }}>
       {/* Shimmer bars — simulasi candlestick */}
       <div style={{ flex: 1, padding: "12px 8px", display: "flex", alignItems: "flex-end", gap: 3 }}>
@@ -98,9 +109,7 @@ function Skeleton({ height, label = "Memuat data chart..." }: { height: number; 
         flexDirection: "column",
         gap: 8,
       }}>
-        <div style={{
-          display: "flex", gap: 4, alignItems: "center",
-        }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           {[0, 1, 2].map(i => (
             <div key={i} style={{
               width: 6, height: 6, borderRadius: "50%",
@@ -131,11 +140,14 @@ function Skeleton({ height, label = "Memuat data chart..." }: { height: number; 
   );
 }
 
-// ── Error state ────────────────────────────────────────────────────────────
+// ── Error overlay ──────────────────────────────────────────────────────────
 
-function ChartError({ ticker, onRetry, height }: { ticker: string; onRetry: () => void; height: number }) {
+function ChartErrorOverlay({ ticker, onRetry, height }: { ticker: string; onRetry: () => void; height: number }) {
   return (
     <div style={{
+      position: "absolute",
+      inset: 0,
+      zIndex: 10,
       height,
       background: C.bg,
       display: "flex",
@@ -172,14 +184,14 @@ export default function CandleChart({
 }: Props) {
   const fetchCandles    = useMarketStore(s => s.fetchCandles);
   const candles         = useMarketStore(s => s.candles[ticker] ?? []);
-  const candleLoading   = useMarketStore(s => s.candleLoading[ticker] ?? false); // FIX 1
-  const candleError     = useMarketStore(s => s.candleError[ticker] ?? null);    // FIX 2
+  const candleLoading   = useMarketStore(s => s.candleLoading[ticker] ?? false);
+  const candleError     = useMarketStore(s => s.candleError[ticker] ?? null);
   const ind             = useIndicators(ticker);
 
   const [overlay, setOverlay] = useState<OverlayIndicator>("sma");
   const [panel,   setPanel]   = useState<PanelIndicator>("none");
 
-  // DOM refs — semua div SELALU di-render
+  // DOM refs — SEMUA div SELALU di-render di DOM (fix utama Bug-1)
   const mainRef  = useRef<HTMLDivElement>(null);
   const volRef   = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -195,14 +207,21 @@ export default function CandleChart({
   const overlaySeries = useRef<ISeriesApi<any>[]>([]);
   const panelSeries   = useRef<ISeriesApi<any>[]>([]);
 
+  // Tracks whether chart instances have been created
+  const chartInitialized = useRef(false);
+
   // ── Fetch on param change ────────────────────────────────────────────────
   useEffect(() => {
     fetchCandles(ticker, period, interval);
   }, [ticker, period, interval, fetchCandles]);
 
   // ── Init charts ONCE on mount ────────────────────────────────────────────
+  // BUG-1 FIX: Chart divs are always in DOM now (rendered inside a wrapper
+  // that is always mounted). This useEffect will always find valid refs.
   useEffect(() => {
     if (!mainRef.current || !volRef.current || !panelRef.current) return;
+    if (chartInitialized.current) return;
+    chartInitialized.current = true;
 
     // Main chart
     mainChart.current = createChart(mainRef.current, {
@@ -245,7 +264,7 @@ export default function CandleChart({
       volChart.current?.applyOptions({ width: w });
       panelChart.current?.applyOptions({ width: w });
     });
-    ro.observe(mainRef.current); // cukup observe satu karena semua sama lebar
+    ro.observe(mainRef.current);
 
     return () => {
       ro.disconnect();
@@ -253,6 +272,7 @@ export default function CandleChart({
       volChart.current?.remove();
       panelChart.current?.remove();
       mainChart.current = volChart.current = panelChart.current = null;
+      chartInitialized.current = false;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -297,7 +317,7 @@ export default function CandleChart({
     }
   }, [overlay, ind]);
 
-  // ── Panel indicators (RSI/MACD) — FIX 4: tidak bergantung display ────────
+  // ── Panel indicators (RSI/MACD) ───────────────────────────────────────────
   useEffect(() => {
     if (!panelChart.current) return;
     panelSeries.current.forEach(s => { try { panelChart.current!.removeSeries(s); } catch {} });
@@ -328,11 +348,12 @@ export default function CandleChart({
   // ── Retry handler ─────────────────────────────────────────────────────────
   const handleRetry = () => fetchCandles(ticker, period, interval);
 
-  // ── Render ───────────────────────────────────────────────────────────────
-  const panelLabel = panel === "rsi" ? "RSI (14)" : panel === "macd" ? "MACD (12,26,9)" : "";
+  // ── Derived flags ─────────────────────────────────────────────────────────
   const isLoading  = candleLoading && candles.length === 0;
   const isError    = !!candleError && !isLoading;
+  const panelLabel = panel === "rsi" ? "RSI (14)" : panel === "macd" ? "MACD (12,26,9)" : "";
 
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", background: C.bg, height: "100%" }}>
 
@@ -392,32 +413,40 @@ export default function CandleChart({
         {overlay === "bb"  && <div style={{ marginLeft: "auto" }}><Legend color={C.bb_mid} label="BB (20,2)" /></div>}
       </div>
 
-      {/* ── FIX 1+2: Loading / Error state — overlay di atas chart area ─ */}
-      {isLoading ? (
-        <Skeleton height={height} />
-      ) : isError ? (
-        <ChartError ticker={ticker} onRetry={handleRetry} height={height} />
-      ) : (
-        <>
-          {/* ── Main chart ──────────────────────────────────────────── */}
-          <div ref={mainRef} style={{ flexShrink: 0 }} />
+      {/* ── BUG-1 FIX: Chart area — divs SELALU ada di DOM ───────────────
+          Skeleton & Error dirender sebagai overlay position:absolute,
+          bukan menggantikan div chart. Ini memastikan chart init useEffect
+          selalu menemukan mainRef.current !== null saat mount.           ── */}
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        {/* Loading overlay */}
+        {isLoading && <SkeletonOverlay height={height} />}
+        {/* Error overlay */}
+        {isError && <ChartErrorOverlay ticker={ticker} onRetry={handleRetry} height={height} />}
 
-          {/* ── Volume pane (terpisah) ───────────────────────────────── */}
-          <div style={{ borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
-            <PaneLabel>VOL</PaneLabel>
-            <div ref={volRef} />
-          </div>
+        {/* Main chart — ALWAYS in DOM */}
+        <div ref={mainRef} style={{ visibility: (isLoading || isError) ? "hidden" : "visible" }} />
+      </div>
 
-          {/* ── RSI / MACD pane — FIX 4: div SELALU ada di DOM ──────── */}
-          <div style={{
-            borderTop: `1px solid ${C.border}`, flexShrink: 0,
-            display: panel !== "none" ? "block" : "none",
-          }}>
-            {panelLabel && <PaneLabel>{panelLabel}</PaneLabel>}
-            <div ref={panelRef} />
-          </div>
-        </>
-      )}
+      {/* Volume pane — ALWAYS in DOM, hidden during loading/error */}
+      <div style={{
+        borderTop: `1px solid ${C.border}`,
+        flexShrink: 0,
+        visibility: (isLoading || isError) ? "hidden" : "visible",
+      }}>
+        <PaneLabel>VOL</PaneLabel>
+        <div ref={volRef} />
+      </div>
+
+      {/* RSI / MACD pane — ALWAYS in DOM (FIX 4) */}
+      <div style={{
+        borderTop: `1px solid ${C.border}`,
+        flexShrink: 0,
+        display: panel !== "none" ? "block" : "none",
+        visibility: (isLoading || isError) ? "hidden" : "visible",
+      }}>
+        {panelLabel && <PaneLabel>{panelLabel}</PaneLabel>}
+        <div ref={panelRef} />
+      </div>
     </div>
   );
 }
