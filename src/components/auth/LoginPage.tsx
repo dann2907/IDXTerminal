@@ -1,7 +1,4 @@
 // src/components/auth/LoginPage.tsx
-//
-// FIX UX: tambah tombol show/hide password agar user bisa verifikasi
-// ketikan sebelum submit — mengurangi friction register & login.
 
 import { useState } from "react";
 import { useAuthStore } from "../../stores/useAuthStore";

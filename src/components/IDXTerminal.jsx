@@ -1,7 +1,7 @@
 // src/components/IDXTerminal.jsx
 //
 // Bloomberg-style trading dashboard — Fase 4/5.
-// Fitur baru: Search saham, Orders TP/SL panel, Trade history, Performance.
+// Fitur baru: Search saham, Orders TP/SL panel, Trade history, Performance, watchlist.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import CandleChart from "./chart/CandleChart";
@@ -10,6 +10,7 @@ import OrdersPanel from "./portfolio/OrdersPanel";
 import TradeHistory from "./portfolio/TradeHistory";
 import PerformancePanel from "./portfolio/PerformancePanel";
 import AlertsPanel from "./alerts/AlertsPanel";
+import TradeConfirmDialog from "./TradeConfirmDialog";
 import Screener from "./market/Screener";
 import { useMarketStore } from "../stores/useMarketStore";
 import { usePortfolioStore } from "../stores/usePortfolioStore";
@@ -396,6 +397,7 @@ export default function IDXTerminal() {
   const [tradeAction, setTradeAction] = useState("BUY");
   const [tradeLots, setTradeLots] = useState("");
   const [tradeMsg, setTradeMsg]   = useState(null);
+  const [tradeConfirmPayload, setTradeConfirmPayload] = useState(null);
   const [portfolioTab, setPortfolioTab] = useState("holdings"); // holdings|orders|history|performance
   const [activeWatchlistCategoryId, setActiveWatchlistCategoryId] = useState(null);
   const [newWatchlistName, setNewWatchlistName] = useState("");
@@ -570,17 +572,35 @@ export default function IDXTerminal() {
   }, [quotes]);
 
   // ── Quick Trade handler ────────────────────────────────────────────────
-  const handleTrade = useCallback(async () => {
+  // Buka dialog konfirmasi â€” TIDAK langsung eksekusi
+  const handleTrade = useCallback(() => {
     const lots = parseInt(tradeLots, 10);
     if (!lots || lots <= 0) return;
     const price = quotes[selectedTicker]?.price;
-    if (!price) { setTradeMsg({ ok: false, message: "Harga belum tersedia" }); return; }
+    if (!price) {
+      setTradeMsg({ ok: false, message: "Harga belum tersedia â€” tunggu data live" });
+      return;
+    }
+    setTradeConfirmPayload({
+      action:      tradeAction,
+      ticker:      selectedTicker,
+      lots,
+      price,
+      avgCost:     holdings.find(h => h.ticker === selectedTicker)?.avg_cost,
+      currentCash: summary?.cash,
+    });
+  }, [tradeLots, tradeAction, selectedTicker, quotes, holdings, summary]);
 
-    const fn = tradeAction === "BUY" ? buy : sell;
-    const res = await fn(selectedTicker, lots, price);
+  // Dipanggil saat user klik Konfirmasi di dialog
+  const handleTradeConfirmed = useCallback(async () => {
+    if (!tradeConfirmPayload) return;
+    const { action, ticker, lots, price } = tradeConfirmPayload;
+    const fn = action === "BUY" ? buy : sell;
+    const res = await fn(ticker, lots, price);
     setTradeMsg(res);
     if (res.ok) setTradeLots("");
-  }, [tradeLots, tradeAction, selectedTicker, quotes, buy, sell]);
+    setTradeConfirmPayload(null);
+  }, [tradeConfirmPayload, buy, sell]);
 
   const indicators = calcIndicators(selectedCandles);
 
@@ -1235,6 +1255,12 @@ export default function IDXTerminal() {
 
         </div>{/* end body */}
       </div>{/* end terminal */}
+
+      <TradeConfirmDialog
+        payload={tradeConfirmPayload}
+        onConfirm={handleTradeConfirmed}
+        onCancel={() => setTradeConfirmPayload(null)}
+      />
     </>
   );
 }

@@ -5,12 +5,6 @@
 //   menyebabkan mainRef.current=null saat chart init useEffect berjalan,
 //   sehingga chart tidak pernah terbuat. Solusi: render semua div selalu,
 //   overlay skeleton/error di atasnya dengan position:absolute.
-//
-// FIX 2: Error state saat fetch gagal (dengan tombol retry)
-// FIX 3: ResizeObserver cover volRef dan panelRef juga
-// FIX 4: panel div selalu di-render (display:none) — bukan conditional render
-// FIX 5: volume sebagai chart terpisah (bisa di-zoom sendiri)
-// FEAT:  prop inWatchlist + onWatchlistToggle untuk tombol ★
 
 import { useEffect, useRef, useState } from "react";
 import {

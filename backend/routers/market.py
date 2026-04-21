@@ -85,6 +85,7 @@ async def ws_prices(websocket: WebSocket) -> None:
     WebSocket stream harga real-time.
     Pesan pertama: snapshot seluruh cache.
     Pesan berikutnya: update inkremental setiap ~15 detik.
+    Optional: gunakan `?format=msgpack` untuk payload biner (default JSON).
     """
     broadcaster = _get_broadcaster()
     await broadcaster.connect(websocket)

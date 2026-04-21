@@ -10,6 +10,14 @@
 #     tidak perlu transaction eksplisit.
 #   - Semua kalkulasi avg_cost, locked_shares, cleanup OCO tetap sama
 #     dengan portofolio.py asli untuk menghindari regresi.
+#
+# FIX MASALAH 1: sell terblokir karena lock TP/SL
+#   - Error message lebih informatif: tampilkan lot yg bisa dijual & lot yg terkunci
+#   - Tambah get_sell_availability() untuk frontend query sebelum submit
+#   - PENDING_CONFIRM TP/SL yg bukan target sell tidak memblokir partial sell
+#   - Auto-cleanup order mati: order yg referensi saham lebih dari kepemilikan
+#     saat ini di-cancel saat sell() dipanggil (posisi berkurang akibat konfirmasi
+#     TP/SL sebelumnya)
 
 import uuid
 from datetime import datetime
@@ -91,6 +99,77 @@ class PortfolioService:
         )
         return max(tp_locked, sl_locked)
 
+    # FIX M1: helper baru — query status sell sebelum submit (dipakai frontend)
+    @staticmethod
+    async def get_sell_availability(
+        db: AsyncSession,
+        ticker: str,
+        prices: dict[str, float],
+    ) -> dict:
+        """
+        Kembalikan info lengkap tentang berapa lot yang bisa dijual untuk ticker.
+        Dipakai frontend untuk menampilkan hint sebelum user submit sell order.
+
+        Return:
+          {
+            "ticker": "BBCA.JK",
+            "total_lots": 10,
+            "locked_lots": 6,          # dikunci order ACTIVE/PENDING_CONFIRM
+            "available_lots": 4,        # bisa dijual manual
+            "locked_by_tp": 3,
+            "locked_by_sl": 6,
+            "active_orders": [...]      # ringkasan order yang mengunci
+          }
+        """
+        ticker = ticker.upper().strip()
+        result = await db.execute(select(Holding).where(Holding.ticker == ticker))
+        holding = result.scalar_one_or_none()
+        if holding is None:
+            return {"ticker": ticker, "total_lots": 0, "locked_lots": 0, "available_lots": 0,
+                    "locked_by_tp": 0, "locked_by_sl": 0, "active_orders": [], "error": "Saham tidak dimiliki"}
+
+        tp_locked, sl_locked = await PortfolioService._get_locked_summary(db, ticker)
+        locked_shares = max(tp_locked, sl_locked)
+        available_shares = max(0, holding.shares - locked_shares)
+
+        # Kumpulkan info order yang mengunci
+        orders_result = await db.execute(
+            select(Order).where(
+                Order.ticker == ticker,
+                Order.status.in_(PortfolioService._LOCKED_ORDER_STATUSES),
+            ).order_by(Order.created_at)
+        )
+        active_orders = orders_result.scalars().all()
+
+        cur_price = prices.get(ticker, holding.avg_cost)
+        is_idx = _is_idx(ticker)
+
+        return {
+            "ticker": ticker,
+            "total_lots": _to_lots(holding.shares) if is_idx else holding.shares,
+            "total_shares": holding.shares,
+            "locked_lots": _to_lots(locked_shares) if is_idx else locked_shares,
+            "locked_shares": locked_shares,
+            "available_lots": _to_lots(available_shares) if is_idx else available_shares,
+            "available_shares": available_shares,
+            "locked_by_tp": _to_lots(tp_locked) if is_idx else tp_locked,
+            "locked_by_sl": _to_lots(sl_locked) if is_idx else sl_locked,
+            "avg_cost": holding.avg_cost,
+            "current_price": cur_price,
+            "pnl_pct": round(((cur_price - holding.avg_cost) / holding.avg_cost * 100)
+                             if holding.avg_cost else 0, 2),
+            "active_orders": [
+                {
+                    "order_id": o.order_id,
+                    "order_type": o.order_type,
+                    "trigger_price": o.trigger_price,
+                    "lots": o.lots,
+                    "status": o.status,
+                }
+                for o in active_orders
+            ],
+        }
+
     # ── Bootstrap ─────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -171,9 +250,6 @@ class PortfolioService:
             for h in holdings
         )
         total_value = meta.cash + stock_value
-
-        # Realized P&L = (total kas sekarang + nilai saham) - modal awal
-        # Ekuivalen dengan menjumlah semua laba/rugi tiap SELL
         realized = total_value - meta.starting_cash - floating
 
         return {
@@ -243,17 +319,14 @@ class PortfolioService:
             )
 
         async with db.begin_nested():
-            # Update kas
             meta.cash -= cost
 
-            # Update atau buat holding
             result = await db.execute(
                 select(Holding).where(Holding.ticker == ticker)
             )
             holding = result.scalar_one_or_none()
 
             if holding:
-                # Weighted average cost
                 new_total = holding.shares + shares
                 holding.avg_cost = (
                     holding.avg_cost * holding.shares + cost
@@ -268,7 +341,6 @@ class PortfolioService:
                 )
                 db.add(holding)
 
-            # Catat ke history
             db.add(TradeHistory(
                 action="BUY",
                 ticker=ticker,
@@ -296,6 +368,15 @@ class PortfolioService:
     ) -> tuple[bool, str]:
         """
         Jual saham. Gagal jika tidak punya saham atau jumlah tidak cukup.
+
+        FIX MASALAH 1:
+        - Sebelum cek lock, auto-cancel order yang referensi saham melebihi
+          kepemilikan saat ini (terjadi saat TP/SL sebelumnya sudah dieksekusi
+          dan mengurangi holding, tapi order lain belum di-recalculate).
+        - Error message sekarang informatif: tampilkan berapa lot yang
+          AVAILABLE dan berapa yang TERKUNCI, bukan sekadar "terkunci".
+        - Saran tindakan disertakan langsung di pesan error.
+
         Manual sell hanya boleh memakai saham yang tidak sedang dikunci
         order ACTIVE/PENDING_CONFIRM. avg_cost tidak berubah saat partial sell.
         Saat semua saham terjual, holding dihapus dan semua order lockable
@@ -317,6 +398,7 @@ class PortfolioService:
 
         if holding is None:
             return False, f"Kamu tidak punya saham {ticker}"
+
         if holding.shares < shares:
             owned_disp = _to_lots(holding.shares) if is_idx else holding.shares
             unit = "lot" if is_idx else "shares"
@@ -324,23 +406,52 @@ class PortfolioService:
                 f"Saham tidak cukup. Kamu punya {owned_disp} {unit}"
             )
 
-        locked_shares = await PortfolioService._get_locked_shares(
+        # FIX M1: Auto-cancel SEBELUM cek lock, agar order mati tidak memblok sell.
+        # Ini terjadi bila konfirmasi TP/SL sebelumnya sudah mengurangi shares,
+        # tapi order lain (pasangan OCO atau order terpisah) masih ACTIVE dengan
+        # jumlah referensi yang melampaui sisa saham.
+        await PortfolioService._cleanup_orphan_orders(db, ticker, holding.shares)
+
+        tp_locked, sl_locked = await PortfolioService._get_locked_summary(
             db,
             ticker,
             exclude_order_id=exclude_order_id,
         )
+        locked_shares = max(tp_locked, sl_locked)
         available_shares = max(0, holding.shares - locked_shares)
+
         full_exit = shares == holding.shares
         manual_full_exit = source == "MANUAL" and full_exit
+
         if shares > available_shares and not manual_full_exit:
-            avail_disp = _to_lots(available_shares) if is_idx else available_shares
+            # FIX M1: Error message yang informatif dengan saran tindakan
+            avail_lots = _to_lots(available_shares) if is_idx else available_shares
+            lock_lots  = _to_lots(locked_shares) if is_idx else locked_shares
             unit = "lot" if is_idx else "shares"
-            return False, (
-                f"Saham terkunci oleh order. Yang bisa dijual hanya {avail_disp} {unit}"
-            )
+            tp_lots = _to_lots(tp_locked) if is_idx else tp_locked
+            sl_lots = _to_lots(sl_locked) if is_idx else sl_locked
+
+            detail_parts = []
+            if tp_lots:
+                detail_parts.append(f"TP {tp_lots} {unit}")
+            if sl_lots:
+                detail_parts.append(f"SL {sl_lots} {unit}")
+            lock_detail = " + ".join(detail_parts) if detail_parts else f"{lock_lots} {unit}"
+
+            if available_shares == 0:
+                suggestion = (
+                    f"Semua saham terkunci oleh order ({lock_detail}). "
+                    f"Cancel salah satu order TP/SL terlebih dahulu, "
+                    f"atau lakukan full exit ({_to_lots(holding.shares) if is_idx else holding.shares} {unit}) untuk menutup semua posisi."
+                )
+            else:
+                suggestion = (
+                    f"Tersedia {avail_lots} {unit} (dikunci: {lock_detail}). "
+                    f"Kurangi jumlah jual, atau cancel order TP/SL terlebih dahulu."
+                )
+            return False, suggestion
 
         avg_cost = holding.avg_cost
-        _realized_pnl = (price - avg_cost) * shares
         proceeds = shares * price
 
         async with db.begin_nested():
@@ -350,7 +461,6 @@ class PortfolioService:
 
             if holding.shares == 0:
                 await db.delete(holding)
-                # Posisi habis: batalkan semua order yang masih bisa mempengaruhi ticker.
                 cancel_q = (
                     update(Order)
                     .where(
@@ -376,6 +486,55 @@ class PortfolioService:
 
         await db.commit()
         return True, f"Jual {unit_label} {ticker} @ {symbol}{price:,.0f}"
+
+    # FIX M1: helper baru — auto-cancel order yg referensi saham > kepemilikan
+    @staticmethod
+    async def _cleanup_orphan_orders(
+        db: AsyncSession,
+        ticker: str,
+        current_shares: int,
+    ) -> int:
+        """
+        Cancel order ACTIVE/PENDING_CONFIRM yang jumlah lembarnya melebihi
+        kepemilikan saat ini. Ini kondisi invalid yang bisa terjadi saat:
+          - TP/SL sebelumnya dikonfirmasi → shares berkurang
+          - Order lain (pasangan OCO atau terpisah) masih ACTIVE dengan
+            referensi shares lama yang sudah tidak valid
+
+        Return: jumlah order yang di-cancel (untuk logging)
+        """
+        result = await db.execute(
+            select(Order).where(
+                Order.ticker == ticker,
+                Order.status.in_(PortfolioService._LOCKED_ORDER_STATUSES),
+            )
+        )
+        orders = result.scalars().all()
+
+        cancelled = 0
+        tp_orders = sorted(
+            [o for o in orders if o.order_type == "TP"],
+            key=lambda o: o.trigger_price,  # cancel TP harga rendah dulu
+        )
+        sl_orders = sorted(
+            [o for o in orders if o.order_type == "SL"],
+            key=lambda o: o.trigger_price, reverse=True,  # cancel SL harga tinggi dulu
+        )
+
+        # Recalculate per sisi — cancel yang melebih kepemilikan
+        for side_orders in (tp_orders, sl_orders):
+            running_total = 0
+            for o in side_orders:
+                running_total += o.shares
+                if running_total > current_shares:
+                    # Order ini (dan sisanya) melebihi kepemilikan — cancel
+                    o.status = "CANCELLED"
+                    cancelled += 1
+
+        if cancelled:
+            await db.commit()
+
+        return cancelled
 
     # ── Trade History ─────────────────────────────────────────────────────────
 
@@ -407,7 +566,6 @@ class PortfolioService:
 
     # ── Orders ────────────────────────────────────────────────────────────────
 
-    
     @staticmethod
     async def order_add(
         db: AsyncSession,
@@ -437,8 +595,6 @@ class PortfolioService:
         if holding is None:
             return False, f"Kamu tidak punya saham {ticker}"
 
-        # PENDING_CONFIRM juga dianggap locked agar user tidak menumpuk
-        # order baru di atas saham yang sedang menunggu keputusan.
         tp_locked, sl_locked = await PortfolioService._get_locked_summary(db, ticker)
 
         if order_type == "TP":
@@ -447,34 +603,38 @@ class PortfolioService:
             locked_after = max(tp_locked, sl_locked + shares)
 
         if locked_after > holding.shares:
-            over = _to_lots(locked_after - holding.shares) if is_idx else locked_after - holding.shares
+            total_lots = _to_lots(holding.shares) if is_idx else holding.shares
+            used_tp = _to_lots(tp_locked) if is_idx else tp_locked
+            used_sl = _to_lots(sl_locked) if is_idx else sl_locked
             unit = "lot" if is_idx else "shares"
             return False, (
-                f"Melebihi kepemilikan sebesar {over} {unit}."
+                f"Tidak bisa pasang order ini: total kepemilikan {total_lots} {unit}, "
+                f"sudah terkunci TP {used_tp} {unit} / SL {used_sl} {unit}. "
+                f"Cancel order lama terlebih dahulu."
             )
 
         avg_cost = holding.avg_cost
         if order_type == "TP":
             if trigger_price == avg_cost:
                 return False, (
-                f"Take Profit ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
-                f"tidak ada keuntungan. Gunakan harga di atas {symbol}{avg_cost:,.0f}."
+                    f"Take Profit ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
+                    f"tidak ada keuntungan. Gunakan harga di atas {symbol}{avg_cost:,.0f}."
                 )
             if trigger_price < avg_cost:
                 return False, (
-                f"Take Profit ({symbol}{trigger_price:,.0f}) harus lebih tinggi "
-                f"dari avg cost ({symbol}{avg_cost:,.0f})."
+                    f"Take Profit ({symbol}{trigger_price:,.0f}) harus lebih tinggi "
+                    f"dari avg cost ({symbol}{avg_cost:,.0f})."
                 )
         elif order_type == "SL":
             if trigger_price == avg_cost:
                 return False, (
-                f"Stop Loss ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
-                f"tidak ada perlindungan modal. Gunakan harga di bawah {symbol}{avg_cost:,.0f}."
+                    f"Stop Loss ({symbol}{trigger_price:,.0f}) sama dengan avg cost — "
+                    f"tidak ada perlindungan modal. Gunakan harga di bawah {symbol}{avg_cost:,.0f}."
                 )
             if trigger_price > avg_cost:
                 return False, (
-                f"Stop Loss ({symbol}{trigger_price:,.0f}) harus lebih rendah "
-                f"dari avg cost ({symbol}{avg_cost:,.0f})."
+                    f"Stop Loss ({symbol}{trigger_price:,.0f}) harus lebih rendah "
+                    f"dari avg cost ({symbol}{avg_cost:,.0f})."
                 )
 
         oid = str(uuid.uuid4())[:8]
@@ -499,10 +659,6 @@ class PortfolioService:
     async def order_cancel(
         db: AsyncSession, order_id: str
     ) -> tuple[bool, str]:
-        """
-        Cancel order. Berlaku untuk status ACTIVE dan PENDING_CONFIRM.
-        EXECUTED dan CANCELLED sudah final.
-        """
         result = await db.execute(
             select(Order).where(Order.order_id == order_id)
         )
@@ -553,11 +709,6 @@ class PortfolioService:
     async def get_pending_confirm_orders(
         db: AsyncSession,
     ) -> list[Order]:
-        """
-        Kembalikan semua order dengan status PENDING_CONFIRM.
-        Digunakan saat startup untuk re-broadcast order yang belum
-        dikonfirmasi user dari sesi sebelumnya.
-        """
         result = await db.execute(
             select(Order).where(Order.status == "PENDING_CONFIRM")
         )
@@ -567,12 +718,6 @@ class PortfolioService:
     async def get_active_orders_for_check(
         db: AsyncSession,
     ) -> list[Order]:
-        """
-        Kembalikan ORM objects langsung (bukan dict) agar order_checker
-        bisa langsung mengubah status tanpa query ulang.
-        Jika satu ticker sudah punya order PENDING_CONFIRM, semua order ACTIVE
-        ticker itu di-skip sampai user confirm/dismiss agar notifikasi tidak spam.
-        """
         pending_order = aliased(Order)
         result = await db.execute(
             select(Order).where(
@@ -591,10 +736,6 @@ class PortfolioService:
     async def mark_order_pending(
         db: AsyncSession, order_id: str, current_price: float
     ) -> bool:
-        """
-        Set status order menjadi PENDING_CONFIRM dan catat waktu trigger.
-        Dipanggil oleh OrderChecker saat harga menyentuh level TP/SL.
-        """
         result = await db.execute(
             update(Order)
             .where(
@@ -613,10 +754,6 @@ class PortfolioService:
     async def confirm_order(
         db: AsyncSession, order_id: str, price: float
     ) -> tuple[bool, str]:
-        """
-        User mengkonfirmasi eksekusi order dari notifikasi.
-        Flow: ambil order → sell → tandai EXECUTED → cancel sisi OCO lawan.
-        """
         result = await db.execute(
             select(Order).where(
                 Order.order_id == order_id,
@@ -627,7 +764,6 @@ class PortfolioService:
         if order is None:
             return False, f"Order {order_id} tidak ditemukan atau sudah diproses"
 
-        # Eksekusi sell
         ok, msg = await PortfolioService.sell(
             db,
             order.ticker,
@@ -637,16 +773,13 @@ class PortfolioService:
             exclude_order_id=order.order_id,
         )
         if not ok:
-            # Kembalikan ke ACTIVE jika sell gagal (misalnya shares berubah)
             order.status = "ACTIVE"
             await db.commit()
             return False, msg
 
-        # Tandai order ini sebagai EXECUTED
         order.status = "EXECUTED"
         order.triggered_at = datetime.utcnow()
 
-        # OCO: cancel sisi lawan yang masih ACTIVE
         opposite = "SL" if order.order_type == "TP" else "TP"
         await db.execute(
             update(Order)
@@ -664,12 +797,6 @@ class PortfolioService:
     async def dismiss_order(
         db: AsyncSession, order_id: str
     ) -> tuple[bool, str]:
-        """
-        User menolak eksekusi order. Kembalikan ke ACTIVE.
-        Ini memungkinkan order untuk terpicu lagi saat harga menyentuh level
-        di poll berikutnya — perilaku yang disengaja agar user tidak kehilangan
-        kesempatan jika harga terus bergerak melewati level.
-        """
         result = await db.execute(
             select(Order).where(
                 Order.order_id == order_id,
@@ -898,19 +1025,11 @@ class PortfolioService:
         prices: dict[str, float],
         period: str = "all",
     ) -> dict:
-        """
-        Hitung metrik performa per ticker.
-        Logic sama dengan performance_metrics.py dari PyQt6 app:
-        - Replay seluruh history untuk cost basis yang akurat
-        - Filter sell dalam periode yang dipilih
-        - Hitung win rate, best/worst trade
-        """
         result = await db.execute(
             select(TradeHistory).order_by(TradeHistory.traded_at.asc())
         )
         history = result.scalars().all()
 
-        # Tentukan cutoff waktu untuk filter periode
         now = datetime.utcnow()
         if period == "day":
             cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -924,7 +1043,6 @@ class PortfolioService:
         else:
             cutoff = None
 
-        # Replay inventory untuk cost basis
         inventory: dict[str, dict] = {}
         stats: dict[str, dict] = {}
         trade_results: list[float] = []
@@ -965,7 +1083,6 @@ class PortfolioService:
                     s["realized_modal"] += modal
                     trade_results.append(realized)
 
-        # Hitung ringkasan
         for ticker_key, s in stats.items():
             modal = s["realized_modal"]
             s["pnl_rp"] = round(s["realized"], 2)
@@ -973,7 +1090,6 @@ class PortfolioService:
                 (s["realized"] / modal * 100) if modal > 0 else 0.0, 2
             )
 
-        # Floating P&L dari holdings aktif
         hold_result = await db.execute(select(Holding))
         holdings = {h.ticker: h for h in hold_result.scalars().all()}
         floating = sum(

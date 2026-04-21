@@ -12,6 +12,7 @@
 // via useEffect([wsStatus]) — tidak perlu duplikat di sini.
 
 import { create } from "zustand";
+import { decode } from "@msgpack/msgpack";
 import { usePortfolioStore } from "./usePortfolioStore";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -67,7 +68,11 @@ let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let _reconnectDelay = 1000;
 const _MAX_RECONNECT = 30_000;
 
-const WS_URL = "ws://127.0.0.1:8765/ws/prices";
+const WS_URL_BASE = "ws://127.0.0.1:8765/ws/prices";
+const WS_FORMAT = import.meta.env.VITE_WS_FORMAT ?? "msgpack";
+const WS_URL = WS_FORMAT
+  ? `${WS_URL_BASE}?format=${encodeURIComponent(WS_FORMAT)}`
+  : WS_URL_BASE;
 const API_BASE = "http://127.0.0.1:8765";
 
 // ── Store ─────────────────────────────────────────────────────────────────
@@ -107,6 +112,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
     set({ wsStatus: "connecting" });
     _ws = new WebSocket(WS_URL);
+    _ws.binaryType = "arraybuffer";
 
     // FIX: hapus fetchOrders dari sini — App.tsx useEffect([wsStatus])
     // sudah handle ini. Memanggil di sini menyebabkan duplikasi request
@@ -117,23 +123,55 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     };
 
     _ws.onmessage = (event) => {
-      let msg: { type: string; data: unknown };
-      try {
-        msg = JSON.parse(event.data as string);
-      } catch {
+      const handleDecoded = (decoded: unknown) => {
+        if (!decoded || typeof decoded !== "object") return;
+        const msg = decoded as { type?: unknown; data?: unknown };
+        if (typeof msg.type !== "string") return;
+
+        if (msg.type === "order_triggered") {
+          usePortfolioStore.getState().handleWsMessage(msg as { type: string; data: unknown });
+          return;
+        }
+        if (msg.type === "snapshot") {
+          set({ quotes: msg.data as Record<string, QuoteData> });
+        } else if (msg.type === "update") {
+          set(state => ({
+            quotes: { ...state.quotes, ...(msg.data as Record<string, QuoteData>) },
+          }));
+        }
+      };
+
+      if (typeof event.data === "string") {
+        try {
+          handleDecoded(JSON.parse(event.data));
+        } catch {
+          return;
+        }
         return;
       }
 
-      if (msg.type === "order_triggered") {
-        usePortfolioStore.getState().handleWsMessage(msg);
+      if (event.data instanceof ArrayBuffer) {
+        try {
+          handleDecoded(decode(new Uint8Array(event.data)));
+        } catch {
+          return;
+        }
         return;
       }
-      if (msg.type === "snapshot") {
-        set({ quotes: msg.data as Record<string, QuoteData> });
-      } else if (msg.type === "update") {
-        set(state => ({
-          quotes: { ...state.quotes, ...(msg.data as Record<string, QuoteData>) },
-        }));
+
+      // Some browsers may still deliver Blob even with binaryType="arraybuffer".
+      if (event.data instanceof Blob) {
+        event.data.arrayBuffer()
+          .then((buf) => {
+            try {
+              handleDecoded(decode(new Uint8Array(buf)));
+            } catch {
+              // ignore decode errors
+            }
+          })
+          .catch(() => {
+            // ignore
+          });
       }
     };
 

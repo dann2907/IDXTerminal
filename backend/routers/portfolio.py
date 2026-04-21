@@ -8,6 +8,7 @@
 # Endpoint list:
 #   GET  /api/portfolio/summary
 #   GET  /api/portfolio/holdings
+#   GET  /api/portfolio/sell-availability/{ticker}   ← FIX M1: baru
 #   POST /api/portfolio/buy
 #   POST /api/portfolio/sell
 #   GET  /api/portfolio/history
@@ -23,7 +24,6 @@
 
 import logging
 from typing import Optional
-
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -155,18 +155,47 @@ async def get_holdings() -> JSONResponse:
     return JSONResponse(data)
 
 
+# FIX M1: endpoint baru — cek availability sebelum sell
+@router.get("/sell-availability/{ticker}")
+async def get_sell_availability(ticker: str) -> JSONResponse:
+    """
+    Kembalikan info berapa lot yang bisa dijual untuk ticker tertentu.
+    Dipakai frontend untuk menampilkan hint di konfirmasi dialog sebelum
+    user submit sell order.
+
+    Response:
+      {
+        "ticker": "BBCA.JK",
+        "total_lots": 10,
+        "locked_lots": 6,
+        "available_lots": 4,
+        "locked_by_tp": 3,
+        "locked_by_sl": 6,
+        "avg_cost": 8500,
+        "current_price": 9200,
+        "pnl_pct": 8.24,
+        "active_orders": [...]
+      }
+    """
+    ticker = ticker.upper().strip()
+    if not ticker.endswith(".JK"):
+        ticker += ".JK"
+    prices = _current_prices()
+    async with AsyncSessionLocal() as db:
+        data = await PortfolioService.get_sell_availability(db, ticker, prices)
+    return JSONResponse(data)
+
+
 @router.post("/buy")
 async def buy(req: BuyRequest) -> JSONResponse:
     """
     Beli saham. Price dikirim dari frontend (user bisa override dari harga live).
-    Jika price tidak dikirim di body, ambil dari cache broadcaster.
     """
     async with AsyncSessionLocal() as db:
         ok, msg = await PortfolioService.buy(db, req.ticker, req.lots, req.price)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
-    # Setelah buy, sync holdings ke TickerRegistry agar harga ticker ini di-track
     await _sync_registry_after_trade()
     return JSONResponse({"ok": True, "message": msg})
 
@@ -233,10 +262,7 @@ async def confirm_order(
     order_id: str,
     req: ConfirmOrderRequest,
 ) -> JSONResponse:
-    """
-    User mengkonfirmasi eksekusi order yang sudah terpicu.
-    Menjalankan sell di backend dan mencatat ke trade_history.
-    """
+    """User mengkonfirmasi eksekusi order yang sudah terpicu."""
     async with AsyncSessionLocal() as db:
         ok, msg = await PortfolioService.confirm_order(db, order_id, req.price)
     if not ok:
@@ -248,10 +274,7 @@ async def confirm_order(
 
 @router.post("/orders/{order_id}/dismiss")
 async def dismiss_order(order_id: str) -> JSONResponse:
-    """
-    User menolak eksekusi order. Order dikembalikan ke status ACTIVE
-    sehingga bisa terpicu lagi di poll berikutnya.
-    """
+    """User menolak eksekusi order. Order dikembalikan ke status ACTIVE."""
     async with AsyncSessionLocal() as db:
         ok, msg = await PortfolioService.dismiss_order(db, order_id)
     if not ok:
@@ -267,6 +290,7 @@ async def cancel_order(order_id: str) -> JSONResponse:
     if not ok:
         raise HTTPException(status_code=404, detail=msg)
     return JSONResponse({"ok": True, "message": msg})
+
 
 @router.get("/watchlist")
 async def get_watchlist() -> JSONResponse:
@@ -360,11 +384,7 @@ async def remove_from_watchlist(
 # ── Registry sync helpers ─────────────────────────────────────────────────────
 
 async def _sync_registry_after_trade() -> None:
-    """
-    Setelah buy/sell/confirm, sync holdings terbaru ke TickerRegistry
-    agar DataFetcher selalu track ticker yang dipegang.
-    """
-    from routers.market import _registry  # noqa: PLC0415 — lazy import hindari circular ref
+    from routers.market import _registry  # noqa: PLC0415
     if _registry is None:
         return
     async with AsyncSessionLocal() as db:
@@ -374,7 +394,6 @@ async def _sync_registry_after_trade() -> None:
 
 
 async def _sync_watchlist_registry() -> None:
-    """Sinkronkan seluruh ticker watchlist ke TickerRegistry."""
     from routers.market import _registry  # noqa: PLC0415
     if _registry is None:
         return

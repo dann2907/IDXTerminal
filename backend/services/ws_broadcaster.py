@@ -18,8 +18,9 @@
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+import msgpack
 from fastapi import WebSocket, WebSocketDisconnect
 
 if TYPE_CHECKING:
@@ -27,11 +28,32 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+WSFormat = Literal["json", "msgpack"]
+
+
+def normalize_ws_format(value: str | None) -> WSFormat:
+    v = (value or "").strip().lower()
+    if v == "msgpack":
+        return "msgpack"
+    return "json"
+
+
+def encode_msgpack(message: dict) -> bytes:
+    return msgpack.packb(message, use_bin_type=True)
+
+
+def decode_msgpack(payload: bytes) -> dict:
+    obj = msgpack.unpackb(payload, raw=False)
+    if not isinstance(obj, dict):
+        raise ValueError("msgpack payload is not a dict")
+    return obj
+
 
 class WSBroadcaster:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
-        self._connections: set[WebSocket] = set()
+        # Map each websocket to its preferred payload format.
+        self._connections: dict[WebSocket, WSFormat] = {}
         # cache: ticker → dict (output dari QuoteData.to_dict())
         self._cache: dict[str, dict] = {}
 
@@ -70,23 +92,26 @@ class WSBroadcaster:
         Accept WebSocket baru, kirim snapshot, lalu tambah ke set.
         Panggil di awal WebSocket endpoint handler.
         """
+        fmt = normalize_ws_format(ws.query_params.get("format"))
         await ws.accept()
         async with self._lock:
-            self._connections.add(ws)
+            self._connections[ws] = fmt
         logger.info(
             "WS client connected. Total: %d", len(self._connections)
         )
         # Kirim seluruh cache sekarang agar client tidak menunggu poll berikutnya
         if self._cache:
-            await self._safe_send(ws, {
+            snapshot = {
                 "type": "snapshot",
                 "data": self.get_snapshot(),
-            })
+            }
+            packed = encode_msgpack(snapshot) if fmt == "msgpack" else None
+            await self._safe_send(ws, fmt, snapshot, packed=packed)
 
     async def disconnect(self, ws: WebSocket) -> None:
         """Hapus koneksi dari set. Aman dipanggil berulang kali."""
         async with self._lock:
-            self._connections.discard(ws)
+            self._connections.pop(ws, None)
         logger.info(
             "WS client disconnected. Total: %d", len(self._connections)
         )
@@ -102,27 +127,46 @@ class WSBroadcaster:
             return
 
         async with self._lock:
-            targets = list(self._connections)
+            targets = list(self._connections.items())
+
+        packed: bytes | None = None
 
         dead: list[WebSocket] = []
-        for ws in targets:
-            ok = await self._safe_send(ws, message)
+        for ws, fmt in targets:
+            if fmt == "msgpack" and packed is None:
+                packed = encode_msgpack(message)
+            ok = await self._safe_send(
+                ws,
+                fmt,
+                message,
+                packed=packed if fmt == "msgpack" else None,
+            )
             if not ok:
                 dead.append(ws)
 
         if dead:
             async with self._lock:
                 for ws in dead:
-                    self._connections.discard(ws)
+                    self._connections.pop(ws, None)
             logger.debug("Removed %d dead WS connections", len(dead))
 
-    async def _safe_send(self, ws: WebSocket, message: dict) -> bool:
+    async def _safe_send(
+        self,
+        ws: WebSocket,
+        fmt: WSFormat,
+        message: dict,
+        *,
+        packed: bytes | None = None,
+    ) -> bool:
         """
-        Kirim JSON ke satu client. Kembalikan False jika gagal.
+        Kirim payload ke satu client. Kembalikan False jika gagal.
         Tidak raise — caller yang memutuskan apa yang dilakukan.
         """
         try:
-            await ws.send_json(message)
+            if fmt == "msgpack":
+                await ws.send_bytes(packed if packed is not None else encode_msgpack(message))
+            else:
+                await ws.send_json(message)
             return True
         except WebSocketDisconnect:
             return False

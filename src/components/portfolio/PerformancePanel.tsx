@@ -5,6 +5,10 @@
 //   - Metrics cards: Realized P&L, Win Rate, Best Trade, Worst Trade
 //   - Per-ticker breakdown table
 //   - Equity curve dari trade history (SVG, no extra deps)
+//
+// Future Improvement(tandain "Done" kalau sudah diimplementasikan):
+//   - upgrade equity curve
+//   - detailed gain/loss perday,week,month,year (include pnl/floating pnl hari ke hari)
 
 import { useState, useEffect, useMemo } from "react";
 import { usePortfolioStore, type TradeRecord } from "../../stores/usePortfolioStore";
