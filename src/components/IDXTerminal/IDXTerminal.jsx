@@ -59,6 +59,7 @@ export default function IDXTerminal() {
     <>
       <div className="terminal">
         <Topbar
+          indexData={indexData}
           wsStatus={wsStatus}
           currentTime={currentTime}
           activePage={page}
