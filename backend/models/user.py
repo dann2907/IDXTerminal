@@ -1,3 +1,4 @@
+# backend/models/user.py
 import uuid
 from datetime import datetime
 from sqlalchemy import String, DateTime
@@ -15,4 +16,10 @@ class User(Base):
 class RevokedToken(Base):
     __tablename__ = "revoked_tokens"
     jti:        Mapped[str]      = mapped_column(String, primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    token:      Mapped[str]      = mapped_column(String, primary_key=True)
+    user_id:    Mapped[str]      = mapped_column(String, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

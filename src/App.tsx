@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import IDXTerminal              from "./components/IDXTerminal";
 import OrderTriggeredDialog     from "./components/OrderTriggeredDialog";
 import LoginPage                from "./components/auth/LoginPage";
+import ResetPasswordPage         from "./components/auth/ResetPasswordPage";
 import { useMarketStore }       from "./stores/useMarketStore";
 import { usePortfolioStore }    from "./stores/usePortfolioStore";
 import { useAuthStore }         from "./stores/useAuthStore";
@@ -50,6 +51,13 @@ export default function App() {
         INITIALIZING SESSION...
       </div>
     );
+  }
+
+  // Simple Router logic based on pathname
+  const path = window.location.pathname;
+
+  if (path === "/reset-password") {
+    return <ResetPasswordPage />;
   }
 
   // Auth Guard

@@ -17,7 +17,11 @@ from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.user import User, RevokedToken
+from models.user import User, RevokedToken, PasswordResetToken
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +31,20 @@ _SECRET_KEY: str = os.environ.get(
     "CHANGE_ME_in_production_use_32_random_bytes",
 )
 _ALGORITHM = "HS256"
-_ACCESS_TOKEN_TTL = 60 * 24 * 7  # 7 days in minutes
+_ACCESS_TOKEN_TTL = int(os.environ.get("ACCESS_TOKEN_TTL_MINUTES", 60 * 24 * 7))
 _BCRYPT_MAX_BYTES = 72
+
+# Delivery mode
+_AUTH_RESET_DELIVERY = os.environ.get("AUTH_RESET_DELIVERY", "email").lower()
+_APP_ENV = os.environ.get("APP_ENV", "production").lower()
+_RESET_TOKEN_TTL_MINUTES = int(os.environ.get("RESET_TOKEN_TTL_MINUTES", 60))
+
+# SMTP Config
+_SMTP_HOST = os.environ.get("SMTP_HOST", "")
+_SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+_SMTP_USER = os.environ.get("SMTP_USER", "")
+_SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+_SMTP_FROM = os.environ.get("SMTP_FROM", "IDX Terminal <no-reply@yourdomain.com>")
 
 # Brute force protection (simple in-memory)
 # Format: {username: {"count": int, "blocked_until": datetime}}
@@ -72,6 +88,50 @@ def create_access_token(user_id: str, username: str) -> str:
 def decode_access_token(token: str) -> dict:
     """Decode and verify a JWT, raising JWTError when invalid."""
     return jwt.decode(token, _SECRET_KEY, algorithms=[_ALGORITHM])
+
+
+def _send_reset_email(email: str, token: str) -> bool:
+    """Send reset password email via SMTP."""
+    if not all([_SMTP_HOST, _SMTP_USER, _SMTP_PASSWORD]):
+        logger.error("SMTP configuration incomplete. Cannot send email.")
+        return False
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = _SMTP_FROM
+        msg["To"] = email
+        msg["Subject"] = "Reset Password - IDX Terminal"
+
+        # Link reset - sesuaikan dengan domain frontend
+        # Karena local-first, kita asumsikan default port tauri/dev
+        reset_link = f"http://localhost:1420/reset-password?token={token}"
+        
+        body = f"""
+Halo,
+
+Anda menerima email ini karena kami menerima permintaan reset password untuk akun IDX Terminal Anda.
+
+Silakan klik link di bawah ini untuk mereset password Anda:
+{reset_link}
+
+Token ini akan kedaluwarsa dalam {_RESET_TOKEN_TTL_MINUTES} menit.
+
+Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini.
+
+Salam,
+Tim IDX Terminal
+        """
+        msg.attach(MIMEText(body, "plain"))
+
+        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as server:
+            server.starttls()
+            server.login(_SMTP_USER, _SMTP_PASSWORD)
+            server.send_message(msg)
+        
+        return True
+    except Exception:
+        logger.exception("Failed to send reset email to %s", email)
+        return False
 
 
 class AuthService:
@@ -219,6 +279,77 @@ class AuthService:
         except Exception:
             await db.rollback()
             return False, "Gagal mengubah password."
+
+    @staticmethod
+    async def forgot_password(db: AsyncSession, email: str) -> tuple[bool, str, Optional[str]]:
+        """Generate reset token and deliver via debug or email."""
+        email = email.strip().lower()
+        res = await db.execute(select(User).where(User.email == email))
+        user = res.scalar_one_or_none()
+        
+        # Generic message to avoid leaking user existence in production
+        generic_msg = "Instruksi reset password telah dikirim jika email terdaftar."
+        
+        if not user:
+            return True, generic_msg, None
+
+        token = str(uuid.uuid4())
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=_RESET_TOKEN_TTL_MINUTES)
+        
+        # Hapus token lama user ini jika ada
+        await db.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+        
+        reset_entry = PasswordResetToken(token=token, user_id=user.id, expires_at=expires_at)
+        db.add(reset_entry)
+        
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("Failed to save reset token")
+            return False, "Gagal memproses permintaan reset password.", None
+
+        # Delivery logic
+        if _AUTH_RESET_DELIVERY == "debug":
+            logger.info("DEBUG MODE: Reset token for %s is %s", email, token)
+            return True, "Mode DEBUG: Token berhasil dibuat.", token
+        
+        # Email delivery
+        sent = _send_reset_email(email, token)
+        if not sent:
+            # If development, show specific error. If production, stay generic but log it.
+            if _APP_ENV == "development":
+                return False, "Gagal mengirim email reset. Periksa konfigurasi SMTP.", None
+            return True, generic_msg, None
+
+        return True, generic_msg, None
+
+    @staticmethod
+    async def reset_password(db: AsyncSession, token: str, new_password: str) -> tuple[bool, str]:
+        """Verify token and update password."""
+        res = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
+        reset_entry = res.scalar_one_or_none()
+        
+        if not reset_entry or reset_entry.expires_at < datetime.now(timezone.utc):
+            return False, "Token tidak valid atau sudah expired."
+        
+        if len(new_password) < 8:
+            return False, "Password baru minimal 8 karakter."
+
+        user = await db.get(User, reset_entry.user_id)
+        if not user:
+            return False, "User tidak ditemukan."
+        
+        try:
+            user.hashed_pw = _hash_password(new_password)
+            db.add(user)
+            await db.delete(reset_entry)
+            await db.commit()
+            return True, "Password berhasil direset. Silakan login."
+        except Exception:
+            await db.rollback()
+            return False, "Gagal mereset password."
+
 
     @staticmethod
     async def get_user_from_token(

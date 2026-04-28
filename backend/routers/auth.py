@@ -38,6 +38,15 @@ class ChangePasswordBody(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+class ForgotPasswordBody(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordBody(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8)
+
+
 # ── Dependency: current user ──────────────────────────────────────────────────
 
 async def get_current_user(
@@ -118,6 +127,32 @@ async def change_password(
 ) -> JSONResponse:
     """Ubah password user."""
     ok, msg = await AuthService.change_password(db, user, body.old_password, body.new_password)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return JSONResponse({"ok": True, "message": msg})
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordBody,
+    db:   AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Request reset password link/token."""
+    ok, msg, debug_token = await AuthService.forgot_password(db, body.email)
+    return JSONResponse({
+        "ok": ok,
+        "message": msg,
+        "debug_token": debug_token
+    })
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordBody,
+    db:   AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Reset password menggunakan token."""
+    ok, msg = await AuthService.reset_password(db, body.token, body.new_password)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
     return JSONResponse({"ok": True, "message": msg})

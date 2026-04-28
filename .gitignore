@@ -211,6 +211,7 @@ dist
 __pycache__
 .venv
 .env
+.env.example
 *.log
 GEMINI.md
 .agents

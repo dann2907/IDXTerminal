@@ -59,15 +59,27 @@ const EYE_BTN: React.CSSProperties = {
   lineHeight: 1,
 };
 
+const TEXT_BTN: React.CSSProperties = {
+  background: "none",
+  border:     "none",
+  color:      C.accent,
+  cursor:     "pointer",
+  fontSize:   11,
+  fontFamily: "'Syne', sans-serif",
+  fontWeight: 700,
+  padding:    0,
+  textAlign:  "left",
+};
+
 export default function LoginPage() {
   const { login, register, loading, error } = useAuthStore();
 
-  const [tab,       setTab]       = useState<"login" | "register">("login");
+  const [tab,       setTab]       = useState<"login" | "register" | "forgot">("login");
   const [username,  setUsername]  = useState("");
   const [email,     setEmail]     = useState("");
   const [password,  setPassword]  = useState("");
   const [password2, setPassword2] = useState("");
-  const [localMsg,  setLocalMsg]  = useState<{ ok: boolean; text: string } | null>(null);
+  const [localMsg,  setLocalMsg]  = useState<{ ok: boolean; text: string; debug_token?: string } | null>(null);
 
   const [showPw,  setShowPw]  = useState(false);
   const [showPw2, setShowPw2] = useState(false);
@@ -81,15 +93,12 @@ export default function LoginPage() {
     e.preventDefault();
     setLocalMsg(null);
     const ok = await login(username, password);
-    // Error mapped automatically by Axios interceptor
     if (!ok) setLocalMsg({ ok: false, text: useAuthStore.getState().error ?? "Login gagal" });
   }
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setLocalMsg(null);
-    
-    // Client-side validation for better UX
     if (username.length < 3) {
       setLocalMsg({ ok: false, text: "Username minimal 3 karakter." });
       return;
@@ -102,11 +111,24 @@ export default function LoginPage() {
       setLocalMsg({ ok: false, text: "Password tidak cocok." });
       return;
     }
-
     const res = await register(username, email, password);
     setLocalMsg({ ok: res.ok, text: res.message });
     if (res.ok) { reset(); setTab("login"); }
   }
+
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault();
+    setLocalMsg(null);
+    const { forgotPassword } = useAuthStore.getState();
+    const res = await forgotPassword(email);
+    setLocalMsg({ ok: res.ok, text: res.message, debug_token: res.debug_token });
+  }
+
+  const handleOpenReset = () => {
+    if (localMsg?.debug_token) {
+      window.location.href = `/reset-password?token=${localMsg.debug_token}`;
+    }
+  };
 
   return (
     <div style={{
@@ -131,21 +153,23 @@ export default function LoginPage() {
         </div>
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: `1px solid ${C.border}` }}>
-          {(["login", "register"] as const).map(t => (
-            <button key={t} onClick={() => { setTab(t); reset(); }}
-              style={{
-                flex: 1, padding: "8px 0", fontSize: 11,
-                fontFamily: "'Syne',sans-serif", fontWeight: 700,
-                letterSpacing: 1, border: "none",
-                background: "transparent", cursor: "pointer",
-                color: tab === t ? C.accent : C.muted,
-                borderBottom: tab === t ? `2px solid ${C.accent}` : "2px solid transparent",
-              }}>
-              {t === "login" ? "MASUK" : "DAFTAR"}
-            </button>
-          ))}
-        </div>
+        {tab !== "forgot" && (
+          <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: `1px solid ${C.border}` }}>
+            {(["login", "register"] as const).map(t => (
+              <button key={t} onClick={() => { setTab(t); reset(); }}
+                style={{
+                  flex: 1, padding: "8px 0", fontSize: 11,
+                  fontFamily: "'Syne',sans-serif", fontWeight: 700,
+                  letterSpacing: 1, border: "none",
+                  background: "transparent", cursor: "pointer",
+                  color: tab === t ? C.accent : C.muted,
+                  borderBottom: tab === t ? `2px solid ${C.accent}` : "2px solid transparent",
+                }}>
+                {t === "login" ? "MASUK" : "DAFTAR"}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* ── Login form ── */}
         {tab === "login" && (
@@ -166,6 +190,11 @@ export default function LoginPage() {
                 </button>
               </div>
             </Field>
+            <div style={{ textAlign: "right", marginTop: -4 }}>
+              <button type="button" onClick={() => { setTab("forgot"); reset(); }} style={TEXT_BTN}>
+                Lupa Password?
+              </button>
+            </div>
             <button type="submit" disabled={loading}
               style={{ ...BTN_PRIMARY, opacity: loading ? 0.6 : 1, marginTop: 4 }}>
               {loading ? "Memproses..." : "Masuk"}
@@ -224,6 +253,30 @@ export default function LoginPage() {
           </form>
         )}
 
+        {/* ── Forgot Password form ── */}
+        {tab === "forgot" && (
+          <form onSubmit={handleForgot} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 12, color: C.text, marginBottom: 8, textAlign: "center", fontFamily: "'Syne', sans-serif" }}>
+              Lupa Password
+            </div>
+            <div style={{ fontSize: 11, color: C.label, marginBottom: 12, textAlign: "center" }}>
+              Masukkan email Anda untuk menerima instruksi reset password.
+            </div>
+            <Field label="Email">
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="nama@email.com" autoComplete="email"
+                style={{ ...INPUT, paddingRight: 12 }} required />
+            </Field>
+            <button type="submit" style={{ ...BTN_PRIMARY, marginTop: 8 }}>
+              Kirim Instruksi
+            </button>
+            <button type="button" onClick={() => { setTab("login"); reset(); }} 
+              style={{ ...TEXT_BTN, textAlign: "center", marginTop: 8 }}>
+              Kembali ke Login
+            </button>
+          </form>
+        )}
+
         {/* Feedback */}
         {(localMsg || error) && (
           <div style={{
@@ -232,7 +285,31 @@ export default function LoginPage() {
             color:      (localMsg?.ok) ? C.up : C.dn,
             border:     `1px solid ${(localMsg?.ok) ? "rgba(0,214,143,0.3)" : "rgba(255,69,96,0.3)"}`,
           }}>
-            {localMsg?.text || error}
+            <div>{localMsg?.text || error}</div>
+            
+            {/* DEV Mode Debug Panel */}
+            {localMsg?.debug_token && (
+              <div style={{ 
+                marginTop: 8, paddingTop: 8, borderTop: `1px solid rgba(0,214,143,0.2)`,
+                fontSize: 10, color: C.text 
+              }}>
+                <div style={{ color: C.label, marginBottom: 4 }}>DEBUG TOKEN (Local Dev):</div>
+                <div style={{ 
+                  background: "#000", padding: 4, borderRadius: 2, 
+                  fontFamily: "monospace", wordBreak: "break-all", marginBottom: 8
+                }}>
+                  {localMsg.debug_token}
+                </div>
+                <button type="button" onClick={handleOpenReset}
+                  style={{
+                    background: C.accent, color: "#fff", border: "none",
+                    borderRadius: 2, padding: "4px 8px", fontSize: 10,
+                    fontWeight: 700, cursor: "pointer", width: "100%"
+                  }}>
+                  BUKA RESET PASSWORD PAGE
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

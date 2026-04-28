@@ -27,6 +27,8 @@ interface AuthState {
   register:       (u: string, e: string, p: string) => Promise<{ ok: boolean; message: string }>;
   logout:         () => Promise<void>;
   changePassword: (oldP: string, newP: string) => Promise<{ ok: boolean; message: string }>;
+  forgotPassword: (email: string) => Promise<{ ok: boolean; message: string; debug_token?: string }>;
+  resetPassword:  (token: string, newPw: string) => Promise<{ ok: boolean; message: string }>;
   loadMe:         () => Promise<void>;
 }
 
@@ -87,6 +89,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await authApi.changePw({ old_password, new_password });
       set({ loading: false });
       return { ok: true, message: "Password berhasil diubah." };
+    } catch (e: any) {
+      const msg = e.message;
+      set({ loading: false, error: msg });
+      return { ok: false, message: msg };
+    }
+  },
+
+  async forgotPassword(email) {
+    set({ loading: true, error: null });
+    try {
+      const { data } = await authApi.forgotPw(email);
+      set({ loading: false });
+      return { ok: data.ok, message: data.message, debug_token: data.debug_token };
+    } catch (e: any) {
+      const msg = e.message;
+      set({ loading: false, error: msg });
+      return { ok: false, message: msg };
+    }
+  },
+
+  async resetPassword(token, new_password) {
+    set({ loading: true, error: null });
+    try {
+      const { data } = await authApi.resetPw({ token, new_password });
+      set({ loading: false });
+      return { ok: data.ok, message: data.message };
     } catch (e: any) {
       const msg = e.message;
       set({ loading: false, error: msg });
