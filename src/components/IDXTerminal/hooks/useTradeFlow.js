@@ -1,14 +1,20 @@
 // src/components/IDXTerminal/hooks/useTradeFlow.js
+//
+// 
+//
+// FIX Masalah 2: handleTrade sekarang membuka dialog konfirmasi dulu,
+//   bukan langsung eksekusi. handleConfirm dipanggil setelah user klik OK.
+
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePortfolioStore } from "../../stores/usePortfolioStore";
+import { usePortfolioStore } from "../../../stores/usePortfolioStore";
 
 export function useTradeFlow(selectedTicker, quotes, holdings, summary) {
   const buy  = usePortfolioStore(s => s.buy);
   const sell = usePortfolioStore(s => s.sell);
 
-  const [action, setAction]        = useState("BUY");
-  const [lots, setLots]            = useState("");
-  const [message, setMessage]      = useState(null);
+  const [action, setAction]               = useState("BUY");
+  const [lots, setLots]                   = useState("");
+  const [message, setMessage]             = useState(null);
   const [confirmPayload, setConfirmPayload] = useState(null);
   const msgTimerRef = useRef(null);
 
@@ -20,7 +26,7 @@ export function useTradeFlow(selectedTicker, quotes, holdings, summary) {
     }
   }, [message]);
 
-  // Build confirm payload
+  // Buka dialog konfirmasi — TIDAK langsung eksekusi
   const handleOpenConfirm = useCallback(() => {
     const lotNum = parseInt(lots, 10);
     if (!lotNum || lotNum <= 0) return;
@@ -31,15 +37,15 @@ export function useTradeFlow(selectedTicker, quotes, holdings, summary) {
     }
     setConfirmPayload({
       action,
-      ticker: selectedTicker,
-      lots: lotNum,
+      ticker:      selectedTicker,
+      lots:        lotNum,
       price,
-      avgCost: holdings.find(h => h.ticker === selectedTicker)?.avg_cost,
+      avgCost:     holdings.find(h => h.ticker === selectedTicker)?.avg_cost,
       currentCash: summary?.cash,
     });
   }, [lots, action, selectedTicker, quotes, holdings, summary]);
 
-  // Executed when user confirms
+  // Dipanggil saat user klik "Konfirmasi" di TradeConfirmDialog
   const handleConfirm = useCallback(async () => {
     if (!confirmPayload) return;
     const { action: act, ticker, lots: lotNum, price } = confirmPayload;

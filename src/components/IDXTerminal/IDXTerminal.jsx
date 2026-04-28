@@ -1,5 +1,5 @@
 // src/components/IDXTerminal/IDXTerminal.jsx
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { usePortfolioStore } from "../../stores/usePortfolioStore";
 import { ensureFonts } from "./utils/ensureFonts";

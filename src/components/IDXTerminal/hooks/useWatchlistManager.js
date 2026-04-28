@@ -1,6 +1,11 @@
 // src/components/IDXTerminal/hooks/useWatchlistManager.js
+//
+// FIX: import path usePortfolioStore diperbaiki dari
+//   "../../stores/usePortfolioStore" → "../../../stores/usePortfolioStore"
+//   (hooks/ ada di dalam IDXTerminal/, satu level lebih dalam dari components/)
+
 import { useState, useEffect, useCallback, useRef } from "react";
-import { usePortfolioStore } from "../../stores/usePortfolioStore";
+import { usePortfolioStore } from "../../../stores/usePortfolioStore";
 
 export function useWatchlistManager() {
   const watchlistCategories   = usePortfolioStore(s => s.watchlistCategories);
@@ -11,20 +16,26 @@ export function useWatchlistManager() {
   const deleteCategory        = usePortfolioStore(s => s.deleteWatchlistCategory);
 
   const [activeCategoryId, setActiveCategoryId] = useState(null);
-  const [message, setMessage] = useState(null);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [tickerInput, setTickerInput] = useState("");
+  const [message, setMessage]                   = useState(null);
+  const [newCategoryName, setNewCategoryName]   = useState("");
+  const [tickerInput, setTickerInput]           = useState("");
   const msgTimerRef = useRef(null);
 
   // Auto‑clear success messages
   useEffect(() => {
     if (message?.ok && msgTimerRef.current === null) {
-      msgTimerRef.current = setTimeout(() => setMessage(null), 4000);
-      return () => { clearTimeout(msgTimerRef.current); msgTimerRef.current = null; };
+      msgTimerRef.current = setTimeout(() => {
+        setMessage(null);
+        msgTimerRef.current = null;
+      }, 4000);
+      return () => {
+        clearTimeout(msgTimerRef.current);
+        msgTimerRef.current = null;
+      };
     }
   }, [message]);
 
-  // Ensure activeCategoryId is valid
+  // Ensure activeCategoryId is valid when categories change
   useEffect(() => {
     if (!watchlistCategories.length) {
       setActiveCategoryId(null);
@@ -35,8 +46,9 @@ export function useWatchlistManager() {
     }
   }, [watchlistCategories, activeCategoryId]);
 
-  const activeCategory = watchlistCategories.find(c => c.id === activeCategoryId) || watchlistCategories[0] || null;
-  const activeTickers = activeCategory ? activeCategory.tickers.map(item => item.ticker) : [];
+  const activeCategory  = watchlistCategories.find(c => c.id === activeCategoryId) || watchlistCategories[0] || null;
+  const activeTickers   = activeCategory ? activeCategory.tickers.map(item => item.ticker) : [];
+  const activeCategoryIdResolved = activeCategory?.id ?? null;
 
   const isTickerInActive = useCallback((ticker) => {
     return activeTickers.includes(ticker);
@@ -97,23 +109,32 @@ export function useWatchlistManager() {
   }, [activeCategory, removeFromWatchlist]);
 
   return {
-    categories: watchlistCategories,
-    activeCategoryId,
-    setActiveCategoryId,
+    // Data
+    categories:        watchlistCategories,
+    activeCategoryId:  activeCategoryIdResolved,
     activeCategory,
     activeTickers,
+
+    // Setters
+    setActiveCategoryId,
+
+    // Queries
     isTickerInActive,
     toggleSelected,
-    message,
-    setMessage,
-    newCategoryName,
-    setNewCategoryName,
+
+    // State
+    msg:              message,
+    setMsg:           setMessage,
+    newName:          newCategoryName,
+    setNewName:       setNewCategoryName,
     tickerInput,
     setTickerInput,
-    handleCreateCategory,
-    handleManualAdd,
-    handleRename,
-    handleDelete,
-    handleRemoveTicker,
+
+    // Actions
+    createNew:        handleCreateCategory,
+    manualAdd:        handleManualAdd,
+    renameActive:     handleRename,
+    deleteActive:     handleDelete,
+    removeTicker:     handleRemoveTicker,
   };
 }
