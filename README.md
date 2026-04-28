@@ -22,47 +22,34 @@ Built with Tauri + React/TypeScript + Python FastAPI.
 
 ```
 idx-terminal/
-├── src/                          # React frontend
-│   ├── components/
-│   │   ├── chart/                # Candlestick, indicators
-│   │   ├── market/               # Overview, heatmap, screener
-│   │   ├── portfolio/            # Holdings, orders, history
-│   │   ├── alerts/               # Price alerts
-│   │   ├── auth/                 # Login, register
-│   │   └── shared/               # Button, Modal, Skeleton
-│   ├── pages/
-│   ├── hooks/
-│   ├── stores/
-│   │   ├── useMarketStore.ts
-│   │   ├── usePortfolioStore.ts
-│   │   └── useAuthStore.ts
-│   ├── lib/
-│   │   ├── api.ts                # Axios → FastAPI
-│   │   ├── ws.ts                 # WebSocket client
-│   │   └── formatters.ts
-│   └── types/index.ts
-│
-├── src-tauri/                    # Tauri (Rust)
-│   ├── src/main.rs
-│   └── tauri.conf.json
-│
-├── backend/                      # Python FastAPI sidecar
+├── backend/                  # FastAPI (API + WS + DB)
 │   ├── main.py
-│   ├── routers/
-│   │   ├── market.py
-│   │   ├── portfolio.py
-│   │   ├── auth.py
-│   │   └── alerts.py
-│   ├── services/
-│   │   ├── data_fetcher.py       
-│   │   ├── portfolio_service.py  
-│   │   ├── alert_service.py
-│   │   └── ws_broadcaster.py
-│   ├── models/
-│   ├── db/
-│   └── requirements.txt
+│   ├── routers/              # auth, market, portfolio, alerts
+│   ├── services/             # business logic (auth, data, ws)
+│   ├── models/               # SQLAlchemy models
+│   └── db/                   # database setup
 │
-└── package.json
+├── src/                      # React frontend
+│   ├── App.tsx
+│   ├── components/
+│   │   ├── IDXTerminal/      # core dashboard (UI + logic)
+│   │   ├── chart/
+│   │   ├── portfolio/
+│   │   ├── market/
+│   │   ├── alerts/
+│   │   └── auth/
+│   ├── stores/               # Zustand state
+│   ├── lib/                  # API + WebSocket client
+│   └── hooks/
+│
+├── src-tauri/                # Desktop shell (Tauri)
+├── scripts/                  # utilities (migration, etc)
+├── tests/
+├── index.html
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+└── tsconfig.node.json
 ```
 
 ## Setup

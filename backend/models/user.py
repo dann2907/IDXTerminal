@@ -11,3 +11,8 @@ class User(Base):
     email:      Mapped[str]      = mapped_column(String(120), unique=True, nullable=False)
     hashed_pw:  Mapped[str]      = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+    jti:        Mapped[str]      = mapped_column(String, primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

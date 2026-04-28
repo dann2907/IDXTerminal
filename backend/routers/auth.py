@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_db
@@ -28,9 +28,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class RegisterBody(BaseModel):
-    username: str
-    email:    str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
+    email:    EmailStr
+    password: str = Field(..., min_length=8)
+
+
+class ChangePasswordBody(BaseModel):
+    old_password: str
+    new_password: str = Field(..., min_length=8)
 
 
 # ── Dependency: current user ──────────────────────────────────────────────────
@@ -90,6 +95,32 @@ async def login(
         "access_token": token,
         "token_type":   "bearer",
     })
+
+
+@router.post("/logout")
+async def logout(
+    token: Annotated[str | None, Depends(oauth2_scheme)],
+    db:    AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Logout — revoke token di server side."""
+    if not token:
+        return JSONResponse({"ok": True, "message": "Sudah logout."})
+    
+    await AuthService.logout(db, token)
+    return JSONResponse({"ok": True, "message": "Logout berhasil."})
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordBody,
+    user=Depends(get_current_user),
+    db:   AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Ubah password user."""
+    ok, msg = await AuthService.change_password(db, user, body.old_password, body.new_password)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return JSONResponse({"ok": True, "message": msg})
 
 
 @router.get("/me")

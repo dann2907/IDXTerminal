@@ -3,7 +3,7 @@
 # Import semua model agar SQLAlchemy metadata ter-register saat init_db().
 # Fase 5: tambah Alert import.
 
-from .user      import User    # noqa: F401
+from .user      import User, RevokedToken    # noqa: F401
 from .portfolio import (       # noqa: F401
     Holding, Order, PortfolioMeta, TradeHistory, Watchlist,
     WatchlistCategory,

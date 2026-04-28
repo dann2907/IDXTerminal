@@ -69,7 +69,6 @@ export default function LoginPage() {
   const [password2, setPassword2] = useState("");
   const [localMsg,  setLocalMsg]  = useState<{ ok: boolean; text: string } | null>(null);
 
-  // FIX: show/hide password state
   const [showPw,  setShowPw]  = useState(false);
   const [showPw2, setShowPw2] = useState(false);
 
@@ -82,16 +81,28 @@ export default function LoginPage() {
     e.preventDefault();
     setLocalMsg(null);
     const ok = await login(username, password);
-    if (!ok) setLocalMsg({ ok: false, text: error ?? "Login gagal" });
+    // Error mapped automatically by Axios interceptor
+    if (!ok) setLocalMsg({ ok: false, text: useAuthStore.getState().error ?? "Login gagal" });
   }
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setLocalMsg(null);
+    
+    // Client-side validation for better UX
+    if (username.length < 3) {
+      setLocalMsg({ ok: false, text: "Username minimal 3 karakter." });
+      return;
+    }
+    if (password.length < 8) {
+      setLocalMsg({ ok: false, text: "Password minimal 8 karakter." });
+      return;
+    }
     if (password !== password2) {
       setLocalMsg({ ok: false, text: "Password tidak cocok." });
       return;
     }
+
     const res = await register(username, email, password);
     setLocalMsg({ ok: res.ok, text: res.message });
     if (res.ok) { reset(); setTab("login"); }
@@ -145,7 +156,6 @@ export default function LoginPage() {
                 style={{ ...INPUT, paddingRight: 12 }} required />
             </Field>
             <Field label="Password">
-              {/* FIX: show/hide password */}
               <div style={{ position: "relative" }}>
                 <input type={showPw ? "text" : "password"}
                   value={password} onChange={e => setPassword(e.target.value)}
@@ -168,8 +178,9 @@ export default function LoginPage() {
           <form onSubmit={handleRegister} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Field label="Username">
               <input value={username} onChange={e => setUsername(e.target.value)}
-                placeholder="min. 3 karakter" autoComplete="username"
-                style={{ ...INPUT, paddingRight: 12 }} required />
+                placeholder="min. 3 karakter (a-z, 0-9, _, -)" autoComplete="username"
+                style={{ ...INPUT, paddingRight: 12 }} required 
+                pattern="^[a-zA-Z0-9_-]+$" title="Hanya huruf, angka, underscore, atau dash" />
             </Field>
             <Field label="Email">
               <input type="email" value={email} onChange={e => setEmail(e.target.value)}
@@ -194,14 +205,12 @@ export default function LoginPage() {
                   placeholder="ulangi password" autoComplete="new-password"
                   style={{
                     ...INPUT,
-                    // FIX: highlight mismatch saat keduanya terisi
                     borderColor: password2 && password !== password2 ? C.dn : C.border,
                   }} required />
                 <button type="button" onClick={() => setShowPw2(v => !v)} style={EYE_BTN}>
                   {showPw2 ? "SEMBUNYIKAN" : "LIHAT"}
                 </button>
               </div>
-              {/* Inline mismatch hint — lebih cepat dari menunggu submit */}
               {password2 && password !== password2 && (
                 <div style={{ fontSize: 11, color: C.dn, marginTop: 4 }}>
                   Password tidak cocok
@@ -216,14 +225,14 @@ export default function LoginPage() {
         )}
 
         {/* Feedback */}
-        {localMsg && (
+        {(localMsg || error) && (
           <div style={{
             marginTop: 12, padding: "8px 12px", borderRadius: 4, fontSize: 12,
-            background: localMsg.ok ? "rgba(0,214,143,0.1)" : "rgba(255,69,96,0.1)",
-            color:      localMsg.ok ? C.up : C.dn,
-            border:     `1px solid ${localMsg.ok ? "rgba(0,214,143,0.3)" : "rgba(255,69,96,0.3)"}`,
+            background: (localMsg?.ok) ? "rgba(0,214,143,0.1)" : "rgba(255,69,96,0.1)",
+            color:      (localMsg?.ok) ? C.up : C.dn,
+            border:     `1px solid ${(localMsg?.ok) ? "rgba(0,214,143,0.3)" : "rgba(255,69,96,0.3)"}`,
           }}>
-            {localMsg.text}
+            {localMsg?.text || error}
           </div>
         )}
       </div>
