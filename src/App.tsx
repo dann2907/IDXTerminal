@@ -3,7 +3,7 @@
 // Root component dengan Auth Gate dan Bootstrap.
 
 import { useEffect } from "react";
-import IDXTerminal              from "./components/IDXTerminal";
+import IDXTerminal              from "./features/dashboard/IDXTerminal";
 import OrderTriggeredDialog     from "./components/OrderTriggeredDialog";
 import LoginPage                from "./components/auth/LoginPage";
 import ResetPasswordPage         from "./components/auth/ResetPasswordPage";
@@ -29,7 +29,14 @@ export default function App() {
     
     initWebSocket();
     const { fetchSummary, fetchHoldings, fetchWatchlist } = usePortfolioStore.getState();
-    Promise.all([fetchSummary(), fetchHoldings(), fetchWatchlist()]);
+    const { fetchIndexData } = useMarketStore.getState();
+
+    Promise.all([
+      fetchSummary(), 
+      fetchHoldings(), 
+      fetchWatchlist(),
+      fetchIndexData()
+    ]);
   }, [token, user, initWebSocket]);
 
   // 3. Sync orders saat WS connected
@@ -55,8 +62,9 @@ export default function App() {
 
   // Simple Router logic based on pathname
   const path = window.location.pathname;
+  const params = new URLSearchParams(window.location.search);
 
-  if (path === "/reset-password") {
+  if (path === "/reset-password" || params.get("action") === "reset") {
     return <ResetPasswordPage />;
   }
 

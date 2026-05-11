@@ -1,12 +1,20 @@
-// src/components/IDXTerminal/helpers/indicators.js
-export function calcIndicators(candles) {
+import { CandleData } from "../../../types";
+
+interface IndicatorResults {
+  ma20: number | null;
+  ma50: number | null;
+  rsi: number | null;
+  macd: number | null;
+}
+
+export function calcIndicators(candles: CandleData[]): IndicatorResults {
   if (!candles || candles.length < 14) {
     return { ma20: null, ma50: null, rsi: null, macd: null };
   }
   const closes = candles.map(c => c.close);
-  const sma = (arr, n) => {
+  const sma = (arr: number[], n: number) => {
     if (arr.length < n) return null;
-    return arr.slice(-n).reduce((s, v) => s + v, 0) / n;
+    return arr.slice(-n).reduce((s: number, v: number) => s + v, 0) / n;
   };
   const ma20 = sma(closes, 20);
   const ma50 = sma(closes, 50);

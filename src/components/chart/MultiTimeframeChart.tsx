@@ -374,16 +374,18 @@ export default function MultiTimeframeChart({
   const [tooltip, setTooltip] = useState<CandleBar | null>(null);
   useEffect(() => {
     if (!mainChart.current || !candleSeries.current) return;
-    const handler = mainChart.current.subscribeCrosshairMove((param) => {
+    const handler = (param: any) => {
       if (!param.time || !param.seriesData.size) {
         setTooltip(null);
         return;
       }
       const bar = param.seriesData.get(candleSeries.current!) as any;
       if (bar) setTooltip({ time: param.time as number, ...bar });
-    });
-    // lightweight-charts returns unsubscribe fn
-    return () => { handler?.(); };  // eslint-disable-line react-hooks/exhaustive-deps
+    };
+    mainChart.current.subscribeCrosshairMove(handler);
+    return () => { 
+      if (mainChart.current) mainChart.current.unsubscribeCrosshairMove(handler); 
+    };  // eslint-disable-line react-hooks/exhaustive-deps
   }, []); 
 
   // ── Render ───────────────────────────────────────────────────────────────

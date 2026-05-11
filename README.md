@@ -7,7 +7,7 @@ Built with Tauri + React/TypeScript + Python FastAPI.
 
 | Layer        | Tech                              |
 |--------------|-----------------------------------|
-| Desktop Shell| Tauri 2.x (Rust)                 |
+| Desktop Shell| Tauri 2.x (Rust)                  |
 | Frontend     | React 18 + TypeScript + Vite      |
 | Styling      | Tailwind CSS + custom CSS vars    |
 | State        | Zustand                           |
@@ -23,16 +23,19 @@ Built with Tauri + React/TypeScript + Python FastAPI.
 ```
 idx-terminal/
 ├── backend/                  # FastAPI (API + WS + DB)
-│   ├── main.py
+│   ├── main.py               # Entry point (app setup)
+│   ├── core/                 # Singleton container & system core
 │   ├── routers/              # auth, market, portfolio, alerts
 │   ├── services/             # business logic (auth, data, ws)
 │   ├── models/               # SQLAlchemy models
-│   └── db/                   # database setup
+│   ├── db/                   # database setup
+│   └── tests/                # restructured services/routers/integration tests
 │
 ├── src/                      # React frontend
 │   ├── App.tsx
-│   ├── components/
-│   │   ├── IDXTerminal/      # core dashboard (UI + logic)
+│   ├── features/
+│   │   └── dashboard/        # normalized dashboard (UI + logic)
+│   ├── components/           # shared UI components
 │   │   ├── chart/
 │   │   ├── portfolio/
 │   │   ├── market/

@@ -7,8 +7,8 @@ const C = {
   bg:     "#040d1a",
   card:   "#070d1c",
   border: "#0f2040",
-  muted:  "#2a4060",
-  label:  "#4a6080",
+  muted:  "#64748b", // Improved contrast from #2a4060
+  label:  "#94a3b8", // Improved contrast from #4a6080
   text:   "#c8d8f0",
   accent: "#2e8fdf",
   up:     "#00d68f",
@@ -126,7 +126,8 @@ export default function LoginPage() {
 
   const handleOpenReset = () => {
     if (localMsg?.debug_token) {
-      window.location.href = `/reset-password?token=${localMsg.debug_token}`;
+      // Ubah ke root path "/" dengan membawa parameter
+      window.location.href = `/?action=reset&token=${localMsg.debug_token}`;
     }
   };
 
@@ -185,7 +186,7 @@ export default function LoginPage() {
                   value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••" autoComplete="current-password"
                   style={INPUT} required />
-                <button type="button" onClick={() => setShowPw(v => !v)} style={EYE_BTN}>
+                <button type="button" onClick={() => setShowPw(v => !v)} style={EYE_BTN} aria-label="Toggle password visibility">
                   {showPw ? "SEMBUNYIKAN" : "LIHAT"}
                 </button>
               </div>
@@ -222,7 +223,7 @@ export default function LoginPage() {
                   value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="min. 8 karakter" autoComplete="new-password"
                   style={INPUT} required />
-                <button type="button" onClick={() => setShowPw(v => !v)} style={EYE_BTN}>
+                <button type="button" onClick={() => setShowPw(v => !v)} style={EYE_BTN} aria-label="Toggle password visibility">
                   {showPw ? "SEMBUNYIKAN" : "LIHAT"}
                 </button>
               </div>
@@ -236,12 +237,12 @@ export default function LoginPage() {
                     ...INPUT,
                     borderColor: password2 && password !== password2 ? C.dn : C.border,
                   }} required />
-                <button type="button" onClick={() => setShowPw2(v => !v)} style={EYE_BTN}>
+                <button type="button" onClick={() => setShowPw2(v => !v)} style={EYE_BTN} aria-label="Toggle password visibility">
                   {showPw2 ? "SEMBUNYIKAN" : "LIHAT"}
                 </button>
               </div>
               {password2 && password !== password2 && (
-                <div style={{ fontSize: 11, color: C.dn, marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: C.dn, marginTop: 4 }} role="alert">
                   Password tidak cocok
                 </div>
               )}
@@ -284,7 +285,7 @@ export default function LoginPage() {
             background: (localMsg?.ok) ? "rgba(0,214,143,0.1)" : "rgba(255,69,96,0.1)",
             color:      (localMsg?.ok) ? C.up : C.dn,
             border:     `1px solid ${(localMsg?.ok) ? "rgba(0,214,143,0.3)" : "rgba(255,69,96,0.3)"}`,
-          }}>
+          }} role="alert">
             <div>{localMsg?.text || error}</div>
             
             {/* DEV Mode Debug Panel */}
@@ -319,10 +320,10 @@ export default function LoginPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
+    <label style={{ display: "block" }}>
       <div style={{ fontSize: 10, color: C.label, fontFamily: "'Syne',sans-serif",
         letterSpacing: 1, marginBottom: 5 }}>{label.toUpperCase()}</div>
       {children}
-    </div>
+    </label>
   );
 }

@@ -9,6 +9,8 @@
 #   5. Mulai DataFetcher polling loop
 # Shutdown: hentikan DataFetcher dan TickerRegistry cleanup task.
 
+import os
+from dotenv import load_dotenv
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -24,14 +26,14 @@ from routers import auth, market, portfolio
 from routers.alerts import router as alerts_router
 from routers.alerts import export_router
 from services.data_fetcher import DataFetcher
-from services.alert_checker import AlertChecker
-from services.order_checker import OrderChecker
 from services.portfolio_service import (
     DEFAULT_WATCHLIST_NAME,
     PortfolioService,
 )
-from services.ticker_registry import TickerRegistry
-from services.ws_broadcaster import WSBroadcaster
+from core import container
+
+
+load_dotenv() # Ini akan meload semua variabel di file .env
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,13 +42,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ── Singletons ────────────────────────────────────────────────────────────────
+# ── Singletons Moved to core/container.py ───────────────────────────────────
 
-registry    = TickerRegistry()
-broadcaster = WSBroadcaster()
-fetcher     = DataFetcher()
-order_checker = OrderChecker()
-alert_checker = AlertChecker()
 
 
 # ── Startup helpers ───────────────────────────────────────────────────────────
@@ -179,30 +176,30 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     await _init_db()
 
     holdings, watchlist = await _load_tickers_from_db()
-    await registry.sync_holdings(holdings)
-    await registry.sync_watchlist(watchlist)
-    registry.start_cleanup()
+    await container.registry.sync_holdings(holdings)
+    await container.registry.sync_watchlist(watchlist)
+    container.registry.start_cleanup()
 
     # Wire singletons ke routers
-    market.set_singletons(registry, broadcaster)
-    portfolio.set_broadcaster(broadcaster)
+    market.set_singletons(container.registry, container.broadcaster)
+    portfolio.set_broadcaster(container.broadcaster)
 
     # OrderChecker tidak punya loop sendiri — ia di-trigger oleh DataFetcher
     # lewat callback yang di-inject ke broadcaster.
-    order_checker.start(broadcaster)
-    alert_checker.start(broadcaster)
+    container.order_checker.start(container.broadcaster)
+    container.alert_checker.start(container.broadcaster)
     # Patch broadcaster agar memanggil order_checker.check() setelah setiap update
     _patch_broadcaster_with_order_check()
 
-    await fetcher.start(registry, broadcaster)
+    await container.fetcher.start(container.registry, container.broadcaster)
     logger.info("IDX Terminal backend ready ✅")
 
     yield  # ── app berjalan ──
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
     logger.info("Shutting down...")
-    await fetcher.stop()
-    await registry.stop()
+    await container.fetcher.stop()
+    await container.registry.stop()
 
 
 def _patch_broadcaster_with_order_check() -> None:
@@ -212,7 +209,7 @@ def _patch_broadcaster_with_order_check() -> None:
     FIX B2: Tambah error handler + done_callback agar exception tidak
     ditelan diam-diam.
     """
-    original_update = broadcaster.update_cache
+    original_update = container.broadcaster.update_cache
 
     def _on_task_done(task: asyncio.Task) -> None:
         if task.cancelled():
@@ -230,13 +227,13 @@ def _patch_broadcaster_with_order_check() -> None:
 
         async def _safe_check() -> None:
             try:
-                snapshot = broadcaster.get_snapshot()
+                snapshot = container.broadcaster.get_snapshot()
                 prices = {
                     ticker: float(q["price"])
                     for ticker, q in snapshot.items()
                 }
-                await order_checker.check(prices)
-                await alert_checker.check(snapshot)
+                await container.order_checker.check(prices)
+                await container.alert_checker.check(snapshot)
             except Exception as exc:  # pylint: disable=broad-except
                 logger.error(
                     "OrderChecker.check() raised: %s",
@@ -253,7 +250,7 @@ def _patch_broadcaster_with_order_check() -> None:
         task = loop.create_task(_safe_check())
         task.add_done_callback(_on_task_done)
 
-    broadcaster.update_cache = patched_update
+    container.broadcaster.update_cache = patched_update
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
@@ -277,12 +274,12 @@ app.include_router(export_router)
 
 @app.get("/health")
 async def health() -> dict:
-    snap = await registry.snapshot()
+    snap = await container.registry.snapshot()
     return {
         "status": "ok",
         "version": "3.0.0",
-        "ws_connections": broadcaster.connection_count,
-        "cached_tickers": len(broadcaster.cached_tickers),
+        "ws_connections": container.broadcaster.connection_count,
+        "cached_tickers": len(container.broadcaster.cached_tickers),
         "registry": snap,
     }
 

@@ -1,28 +1,43 @@
-// src/components/IDXTerminal/hooks/useTradeFlow.js
-//
-// 
-//
-// FIX Masalah 2: handleTrade sekarang membuka dialog konfirmasi dulu,
-//   bukan langsung eksekusi. handleConfirm dipanggil setelah user klik OK.
-
 import { useState, useCallback, useEffect, useRef } from "react";
 import { usePortfolioStore } from "../../../stores/usePortfolioStore";
+import { QuoteData, Holding, PortfolioSummary } from "../../../types";
 
-export function useTradeFlow(selectedTicker, quotes, holdings, summary) {
+interface TradeMessage {
+  ok: boolean;
+  message: string;
+}
+
+interface ConfirmPayload {
+  action: "BUY" | "SELL";
+  ticker: string;
+  lots: number;
+  price: number;
+  avgCost: number | undefined;
+  currentCash: number | undefined;
+}
+
+export function useTradeFlow(
+  selectedTicker: string, 
+  quotes: Record<string, QuoteData>, 
+  holdings: Holding[], 
+  summary: PortfolioSummary | null
+) {
   const buy  = usePortfolioStore(s => s.buy);
   const sell = usePortfolioStore(s => s.sell);
 
-  const [action, setAction]               = useState("BUY");
+  const [action, setAction]               = useState<"BUY" | "SELL">("BUY");
   const [lots, setLots]                   = useState("");
-  const [message, setMessage]             = useState(null);
-  const [confirmPayload, setConfirmPayload] = useState(null);
-  const msgTimerRef = useRef(null);
+  const [message, setMessage]             = useState<TradeMessage | null>(null);
+  const [confirmPayload, setConfirmPayload] = useState<ConfirmPayload | null>(null);
+  const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto‑clear success messages after 6s
   useEffect(() => {
     if (message?.ok) {
       msgTimerRef.current = setTimeout(() => setMessage(null), 6000);
-      return () => clearTimeout(msgTimerRef.current);
+      return () => {
+        if (msgTimerRef.current) clearTimeout(msgTimerRef.current);
+      };
     }
   }, [message]);
 

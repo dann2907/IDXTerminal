@@ -104,7 +104,7 @@ def _send_reset_email(email: str, token: str) -> bool:
 
         # Link reset - sesuaikan dengan domain frontend
         # Karena local-first, kita asumsikan default port tauri/dev
-        reset_link = f"http://localhost:1420/reset-password?token={token}"
+        reset_link = f"http://localhost:1420/?action=reset&token={token}"
         
         body = f"""
 Halo,
@@ -329,9 +329,19 @@ class AuthService:
         """Verify token and update password."""
         res = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
         reset_entry = res.scalar_one_or_none()
-        
-        if not reset_entry or reset_entry.expires_at < datetime.now(timezone.utc):
-            return False, "Token tidak valid atau sudah expired."
+
+        # Jika token tidak ada, langsung return
+        if not reset_entry:
+            return False, "Token tidak valid."
+
+        # Pastikan expires_at memiliki info timezone agar bisa dibandingkan
+        expires_at = reset_entry.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        # Sekarang perbandingan aman dilakukan
+        if expires_at < datetime.now(timezone.utc):
+            return False, "Token sudah expired."
         
         if len(new_password) < 8:
             return False, "Password baru minimal 8 karakter."

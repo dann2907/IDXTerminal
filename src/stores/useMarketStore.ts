@@ -50,6 +50,7 @@ interface MarketState {
   candleLoading: Record<string, boolean>;
   candleError: Record<string, string | null>;
   wsStatus: WsStatus;
+  indexData: QuoteData | null;
 
   getQuote: (ticker: string) => QuoteData | undefined;
   topGainers: (n?: number) => QuoteData[];
@@ -59,6 +60,7 @@ interface MarketState {
   disconnectWebSocket: () => void;
   fetchCandles: (ticker: string, period?: string, interval?: string) => Promise<void>;
   searchTicker: (query: string) => Promise<QuoteData | null>;
+  fetchIndexData: () => Promise<void>;
 }
 
 // ── WebSocket singleton ───────────────────────────────────────────────────
@@ -83,6 +85,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   candleLoading: {},
   candleError:   {},
   wsStatus: "disconnected",
+  indexData: null,
 
   // ── Computed ──────────────────────────────────────────────────────────────
 
@@ -248,6 +251,17 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     } catch (err) {
       console.error("[useMarketStore] searchTicker error:", err);
       return null;
+    }
+  },
+
+  async fetchIndexData() {
+    try {
+      const res = await fetch(`${API_BASE}/api/market/ihsg`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as QuoteData;
+      set({ indexData: data });
+    } catch (err) {
+      console.error("[useMarketStore] fetchIndexData error:", err);
     }
   },
 }));
