@@ -7,7 +7,7 @@ interface SparklineProps {
   height?: number;
 }
 
-function Sparkline({ data, color, width = 60, height = 20 }: SparklineProps) {
+function Sparkline({ data, color, width = 60, height = 20 }: Readonly<SparklineProps>) {
   if (!data || data.length < 2) return null;
 
   const min = Math.min(...data);

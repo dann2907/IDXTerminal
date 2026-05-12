@@ -43,7 +43,7 @@ interface ScreenerState {
   loadSavedFilter: (name: string) => void;
 }
 
-const DEFAULT_COLUMNS = ["price", "change_pct", "volume", "signals", "high", "low"];
+const DEFAULT_COLUMNS = ["price", "sparkline", "change_pct", "volume", "range", "rvol", "signals", "market_cap"];
 
 const DEFAULT_FILTERS: ScreenerFilters = {
   search: "",
@@ -145,12 +145,18 @@ export const useScreenerStore = create<ScreenerState>()(
     }),
     {
       name: "idx-screener-storage",
-      version: 1,
+      version: 2,
       migrate: (persistedState: any, version: number) => {
-        if (version === 0) {
-          // Add missing visibleColumns if migrating from version 0
-          if (persistedState.filters && !persistedState.filters.visibleColumns) {
-            persistedState.filters.visibleColumns = [...DEFAULT_COLUMNS];
+        if (version < 2) {
+          // Ensure new columns are present in existing user state
+          if (persistedState.filters) {
+            const current = persistedState.filters.visibleColumns || [];
+            const essential = ["sparkline", "range", "rvol", "market_cap"];
+            essential.forEach(col => {
+              if (!current.includes(col)) current.push(col);
+            });
+            // Clean up obsolete IDs if any
+            persistedState.filters.visibleColumns = current.filter((c: string) => c !== "high" && c !== "low");
           }
         }
         return persistedState;
