@@ -1,125 +1,120 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useMarketStore } from "../../../stores/useMarketStore";
-import { WatchlistCategory } from "../../../types";
+import { usePortfolioStore } from "../../../stores/usePortfolioStore";
 
 export function useWatchlistManager() {
-  const { quotes } = useMarketStore();
-  const [categories, setCategories] = useState<WatchlistCategory[]>([]);
+  const watchlistCategories   = usePortfolioStore(s => s.watchlistCategories);
+  const addToWatchlist        = usePortfolioStore(s => s.addToWatchlist);
+  const removeFromWatchlist   = usePortfolioStore(s => s.removeFromWatchlist);
+  const createCategory        = usePortfolioStore(s => s.createWatchlistCategory);
+  const renameCategory        = usePortfolioStore(s => s.renameWatchlistCategory);
+  const deleteCategory        = usePortfolioStore(s => s.deleteWatchlistCategory);
+
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
-  const [newName, setNewName] = useState("");
-  const [tickerInput, setTickerInput] = useState("");
-  const [message, setMessage] = useState<{ ok: boolean; message: string } | null>(null);
+  const [message, setMessage]                   = useState<{ ok: boolean; message: string } | null>(null);
+  const [newCategoryName, setNewCategoryName]   = useState("");
+  const [tickerInput, setTickerInput]           = useState("");
   const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Mock initial load - normally from backend
-  useEffect(() => {
-    // In actual app, fetch from /api/portfolio/watchlist
-    const initial: WatchlistCategory[] = [
-      { 
-        id: 1, 
-        name: "Default", 
-        is_default: true, 
-        tickers: [
-          { ticker: "BBCA.JK", price: null },
-          { ticker: "TLKM.JK", price: null },
-          { ticker: "ASII.JK", price: null }
-        ] 
-      }
-    ];
-    setCategories(initial);
-    setActiveCategoryId(1);
-  }, []);
-
-  // Auto-clear message
+  // Auto‑clear success messages
   useEffect(() => {
     if (message?.ok && msgTimerRef.current === null) {
       msgTimerRef.current = setTimeout(() => {
         setMessage(null);
         msgTimerRef.current = null;
-      }, 5000);
-    }
-    return () => {
-      if (msgTimerRef.current) {
-        clearTimeout(msgTimerRef.current);
+      }, 4000);
+      return () => {
+        if (msgTimerRef.current) clearTimeout(msgTimerRef.current);
         msgTimerRef.current = null;
-      }
-    };
+      };
+    }
   }, [message]);
 
-  const activeCategory = categories.find(c => c.id === activeCategoryId) || null;
-  const activeTickers = activeCategory?.tickers.map(t => t.ticker) || [];
+  // Ensure activeCategoryId is valid when categories change
+  useEffect(() => {
+    if (!watchlistCategories.length) {
+      setActiveCategoryId(null);
+      return;
+    }
+    if (activeCategoryId === null || !watchlistCategories.some(c => c.id === activeCategoryId)) {
+      setActiveCategoryId(watchlistCategories[0].id);
+    }
+  }, [watchlistCategories, activeCategoryId]);
 
-  const handleSetActiveId = (id: number) => setActiveCategoryId(id);
+  const activeCategory  = watchlistCategories.find(c => c.id === activeCategoryId) || watchlistCategories[0] || null;
+  const activeTickers   = activeCategory ? activeCategory.tickers.map(item => item.ticker) : [];
+  const activeCategoryIdResolved = activeCategory?.id ?? null;
 
   const isTickerInActive = useCallback((ticker: string) => {
     return activeTickers.includes(ticker);
   }, [activeTickers]);
 
   const toggleSelected = useCallback(async (ticker: string) => {
-    if (!activeCategoryId) return;
-    // Mock API call
-    const res = { ok: true, message: `Ticker ${ticker} updated` };
+    if (!activeCategory) return;
+    if (isTickerInActive(ticker)) {
+      const res = await removeFromWatchlist(ticker, activeCategory.id);
+      setMessage(res);
+    } else {
+      const res = await addToWatchlist(ticker, activeCategory.id);
+      setMessage(res);
+    }
+  }, [activeCategory, isTickerInActive, addToWatchlist, removeFromWatchlist]);
+
+  const handleCreateCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    const res = await createCategory(name);
     setMessage(res);
-  }, [activeCategoryId]);
-
-  const handleCreateNew = async () => {
-    if (!newName.trim()) return;
-    const res = { ok: true, message: "Kategori dibuat", category: { id: Date.now(), name: newName, is_default: false, tickers: [] } };
-    setMessage(res);
-    setCategories([...categories, res.category]);
-    setActiveCategoryId(res.category.id);
-    setNewName("");
-  };
-
-  const handleRenameActive = async () => {
-    if (!activeCategory || !newName.trim()) return;
-    const updated = categories.map(c => c.id === activeCategoryId ? { ...c, name: newName } : c);
-    setCategories(updated);
-    setMessage({ ok: true, message: "Kategori diubah" });
-    setNewName("");
-  };
-
-  const handleDeleteActive = async () => {
-    if (!activeCategory || activeCategory.is_default) return;
-    const filtered = categories.filter(c => c.id !== activeCategoryId);
-    setCategories(filtered);
-    setActiveCategoryId(filtered[0]?.id || null);
-    setMessage({ ok: true, message: "Kategori dihapus" });
+    if (res.ok && res.category) {
+      setActiveCategoryId(res.category.id);
+      setNewCategoryName("");
+    }
   };
 
   const handleManualAdd = async () => {
-    if (!activeCategoryId || !tickerInput.trim()) return;
-    const tickerStr = tickerInput.trim().toUpperCase().endsWith(".JK") ? tickerInput.trim().toUpperCase() : `${tickerInput.trim().toUpperCase()}.JK`;
-    const res = { ok: true, message: "Ticker ditambahkan" };
+    if (!activeCategory) return;
+    const ticker = tickerInput.trim();
+    if (!ticker) return;
+    const res = await addToWatchlist(ticker, activeCategory.id);
     setMessage(res);
-    const updated = categories.map(c => c.id === activeCategoryId ? { ...c, tickers: [...c.tickers, { ticker: tickerStr, price: null }] } : c);
-    setCategories(updated);
-    setTickerInput("");
+    if (res.ok) setTickerInput("");
+  };
+
+  const handleRename = async () => {
+    if (!activeCategory) return;
+    const next = window.prompt("Nama baru watchlist:", activeCategory.name);
+    if (!next || next.trim() === activeCategory.name) return;
+    const res = await renameCategory(activeCategory.id, next);
+    setMessage(res);
+  };
+
+  const handleDelete = async () => {
+    if (!activeCategory || activeCategory.is_default) return;
+    if (!window.confirm(`Hapus watchlist "${activeCategory.name}"?`)) return;
+    const res = await deleteCategory(activeCategory.id);
+    setMessage(res);
   };
 
   const handleRemoveTicker = useCallback(async (ticker: string) => {
-    if (!activeCategoryId) return;
-    const res = { ok: true, message: "Ticker dihapus" };
+    if (!activeCategory) return;
+    const res = await removeFromWatchlist(ticker, activeCategory.id);
     setMessage(res);
-    const updated = categories.map(c => c.id === activeCategoryId ? { ...c, tickers: c.tickers.filter(t => t.ticker !== ticker) } : c);
-    setCategories(updated);
-  }, [activeCategoryId]);
+  }, [activeCategory, removeFromWatchlist]);
 
   return {
-    categories,
-    active: activeCategory,
+    categories:        watchlistCategories,
+    active:           activeCategory,
     activeTickers,
-    setActiveId: handleSetActiveId,
-    newName,
-    setNewName,
-    createNew: handleCreateNew,
-    renameActive: handleRenameActive,
-    deleteActive: handleDeleteActive,
+    setActiveId:      setActiveCategoryId,
+    newName:          newCategoryName,
+    setNewName:       setNewCategoryName,
+    createNew:        handleCreateCategory,
+    renameActive:     handleRename,
+    deleteActive:     handleDelete,
     tickerInput,
     setTickerInput,
-    manualAdd: handleManualAdd,
-    removeTicker: handleRemoveTicker,
-    msg: message,
+    manualAdd:        handleManualAdd,
+    removeTicker:     handleRemoveTicker,
+    msg:              message,
     toggleSelected,
   };
 }

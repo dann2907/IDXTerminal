@@ -21,6 +21,7 @@
 
 import asyncio
 import logging
+import math
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -82,6 +83,16 @@ _YFINANCE_TIMEOUT = 10    # detik untuk yfinance request
 _YFINANCE_RETRIES = 1      
 _YFINANCE_RETRY_DELAY = 2 # detik tunggu sebelum retry
 
+
+def _is_valid_float(v: any) -> bool:
+    """True if v is a finite number."""
+    try:
+        f = float(v)
+        return not (math.isnan(f) or math.isinf(f))
+    except (TypeError, ValueError):
+        return False
+
+
 # ── QuoteData ─────────────────────────────────────────────────────────────────
 
 class QuoteData:
@@ -92,6 +103,10 @@ class QuoteData:
         "change", "change_pct",
         "open", "high", "low", "volume",
         "timestamp", "is_live",
+        "name", "sector", "market_cap",
+        "fifty_two_week_high", "fifty_two_week_low",
+        "pe_ratio", "pbv_ratio", "dividend_yield",
+        "avg_volume",
     )
 
     def __init__(
@@ -104,18 +119,37 @@ class QuoteData:
         low: float,
         volume: int,
         is_live: bool,
+        name: str = "",
+        sector: str = "",
+        market_cap: float = 0.0,
+        fifty_two_week_high: float = 0.0,
+        fifty_two_week_low: float = 0.0,
+        pe_ratio: float = 0.0,
+        pbv_ratio: float = 0.0,
+        dividend_yield: float = 0.0,
+        avg_volume: float = 0.0,
     ) -> None:
         self.ticker = ticker
-        self.price = price
-        self.prev_close = prev_close
-        self.open = open_
-        self.high = high
-        self.low = low
-        self.volume = volume
+        self.price = price if _is_valid_float(price) else 0.0
+        self.prev_close = prev_close if _is_valid_float(prev_close) else self.price
+        self.open = open_ if _is_valid_float(open_) else self.price
+        self.high = high if _is_valid_float(high) else self.price
+        self.low = low if _is_valid_float(low) else self.price
+        self.volume = volume if _is_valid_float(volume) else 0
         self.is_live = is_live
-        self.change = round(price - prev_close, 2)
+        self.name = name
+        self.sector = sector
+        self.market_cap = market_cap if _is_valid_float(market_cap) else 0.0
+        self.fifty_two_week_high = fifty_two_week_high if _is_valid_float(fifty_two_week_high) else 0.0
+        self.fifty_two_week_low = fifty_two_week_low if _is_valid_float(fifty_two_week_low) else 0.0
+        self.pe_ratio = pe_ratio if _is_valid_float(pe_ratio) else 0.0
+        self.pbv_ratio = pbv_ratio if _is_valid_float(pbv_ratio) else 0.0
+        self.dividend_yield = dividend_yield if _is_valid_float(dividend_yield) else 0.0
+        self.avg_volume = avg_volume if _is_valid_float(avg_volume) else 0.0
+        
+        self.change = round(self.price - self.prev_close, 2)
         self.change_pct = round(
-            ((price - prev_close) / prev_close) * 100 if prev_close else 0.0, 2
+            ((self.price - self.prev_close) / self.prev_close) * 100 if self.prev_close else 0.0, 2
         )
         self.timestamp = datetime.now(_WIB).isoformat()
 
@@ -132,6 +166,15 @@ class QuoteData:
             "volume": self.volume,
             "timestamp": self.timestamp,
             "is_live": self.is_live,
+            "name": self.name,
+            "sector": self.sector,
+            "market_cap": self.market_cap,
+            "fifty_two_week_high": self.fifty_two_week_high,
+            "fifty_two_week_low": self.fifty_two_week_low,
+            "pe_ratio": self.pe_ratio,
+            "pbv_ratio": self.pbv_ratio,
+            "dividend_yield": self.dividend_yield,
+            "avg_volume": self.avg_volume,
         }
 
 
@@ -153,6 +196,9 @@ class DataFetcher:
     def __init__(self) -> None:
         self._session: aiohttp.ClientSession | None = None
         self._task: asyncio.Task | None = None
+        self._metadata_task: asyncio.Task | None = None
+        self._metadata_cache: dict[str, dict] = {}
+        self._discovered_tickers: set[str] = set()
 
     async def start(
         self,
@@ -166,15 +212,23 @@ class DataFetcher:
         self._task = asyncio.create_task(
             self._poll_loop(registry, broadcaster)
         )
+        self._metadata_task = asyncio.create_task(
+            self._metadata_loop(registry)
+        )
         logger.info("DataFetcher started (interval=%ds)", _POLL_INTERVAL)
 
     async def stop(self) -> None:
         if self._task and not self._task.done():
             self._task.cancel()
-            try:
+        if self._metadata_task and not self._metadata_task.done():
+            self._metadata_task.cancel()
+        try:
+            if self._task:
                 await self._task
-            except asyncio.CancelledError:
-                pass
+            if self._metadata_task:
+                await self._metadata_task
+        except asyncio.CancelledError:
+            pass
         if self._session:
             await self._session.close()
 
@@ -188,20 +242,72 @@ class DataFetcher:
         while True:
             try:
                 tickers = await registry.get_all()
-                if tickers:
-                    results = await self._fetch_all(tickers)
-                    if results:
-                        broadcaster.update_cache(results)
-                        await broadcaster.broadcast({
-                            "type": "update",
-                            "data": {t: q.to_dict() for t, q in results.items()},
-                        })
+                # Selalu jalankan fetch agar Market Movers terisi saat market buka
+                # (walaupun watchlist kosong).
+                results = await self._fetch_all(tickers)
+                if results:
+                    broadcaster.update_cache(results)
+                    await broadcaster.broadcast({
+                        "type": "update",
+                        "data": {t: q.to_dict() for t, q in results.items()},
+                    })
             except asyncio.CancelledError:
                 logger.info("DataFetcher poll loop cancelled")
                 return
             except Exception as exc:  # pylint: disable=broad-except
                 logger.error("DataFetcher poll error: %s", exc, exc_info=True)
             await asyncio.sleep(_POLL_INTERVAL)
+
+    # ── Metadata loop ─────────────────────────────────────────────────────────
+
+    async def _metadata_loop(self, registry: TickerRegistry) -> None:
+        """
+        Sync metadata (sector, fundamentals) setiap 24 jam.
+        Lakukan secara bertahap agar tidak kena rate-limit yfinance.
+        """
+        while True:
+            try:
+                # Prioritaskan registry (watchlist/holdings)
+                reg_tickers = await registry.get_all()
+                
+                # Gabungkan dengan discovered tickers (seluruh pasar)
+                # pindahkan dari set ke list lokal untuk diproses
+                to_process = sorted(set(reg_tickers) | self._discovered_tickers)
+                
+                if to_process:
+                    logger.info("Starting metadata sync for %d tickers", len(to_process))
+                    for i in range(0, len(to_process), 5):
+                        chunk = to_process[i:i+5]
+                        for ticker in chunk:
+                            # Selalu fetch jika belum ada, atau refresh jika sudah 24 jam
+                            # (Untuk sekarang, simpan saja jika belum ada)
+                            if ticker not in self._metadata_cache:
+                                meta = await self._fetch_metadata_yfinance(ticker)
+                                if meta:
+                                    self._metadata_cache[ticker] = meta
+                                    # Hapus dari discovered set jika berhasil
+                                    self._discovered_tickers.discard(ticker)
+                                await asyncio.sleep(1.2) # Throttling yfinance
+                        await asyncio.sleep(2.0)
+                    logger.info("Metadata sync complete")
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.error("Metadata loop error: %s", exc)
+
+            await asyncio.sleep(86400)  # 24 jam
+
+    async def _fetch_metadata_yfinance(self, ticker: str) -> dict | None:
+        """Ambil info fundamental/meta dari yfinance."""
+        loop = asyncio.get_running_loop()
+        try:
+            info = await asyncio.wait_for(
+                loop.run_in_executor(None, _blocking_yfinance_info, ticker),
+                timeout=15,
+            )
+            return info
+        except Exception:
+            return None
 
     # ── Fetch all tickers ─────────────────────────────────────────────────────
 
@@ -213,64 +319,57 @@ class DataFetcher:
 
         Market BUKA:
           1. Ambil snapshot seluruh IDX dalam SATU request (~700 saham)
-          2. Filter ke tickers yang dibutuhkan user
-          3. Ticker yang tidak ada di snapshot → fallback yfinance (saham baru, dll)
+          2. Return seluruh snapshot agar Market Movers & Screener punya data lengkap.
+          3. Ticker di registry yang tidak ada di snapshot → fallback yfinance.
 
         Market TUTUP:
-          Langsung yfinance last-close (IDX API kembalikan data stale).
+          1. Tetap ambil snapshot IDX (berisi harga closing terakhir).
+          2. Update ticker di registry via yfinance untuk akurasi prev_close/last price.
 
-        Manfaat snapshot:
-          - 1 request vs N request (N = jumlah ticker user)
-          - Tidak kena rate-limit IDX
-          - Latency jauh lebih stabil
+        Manfaat:
+          - Market Movers & Screener selalu punya data (bukan cuma saat buka).
         """
-        if not is_market_open():
-            return await self._fetch_all_yfinance(tickers)
+        # ── Step 1: Ambil snapshot seluruh pasar ───────────────────────────
+        # Ini memberikan data 700+ saham dalam 1 request.
+        results = await self._fetch_idx_snapshot()
 
-        # ── Market buka: snapshot IDX ──────────────────────────────────────
-        snapshot = await self._fetch_idx_snapshot()
+        # ── Step 2: Fallback / Update Registry Tickers ─────────────────────
+        # Jika market tutup, kita lebih percaya yfinance untuk ticker watchlist/holdings.
+        # Jika market buka, kita hanya fetch ticker yang MISSING dari snapshot.
+        is_open = is_market_open()
+        
+        if not is_open:
+            # Market TUTUP: Refresh registry tickers via yfinance untuk akurasi closing.
+            if tickers:
+                logger.debug("Market closed: refreshing %d registry tickers via yfinance", len(tickers))
+                yf_results = await self._fetch_all_yfinance(tickers)
+                results.update(yf_results)
+        else:
+            # Market BUKA: Hanya fetch yang missing dari snapshot.
+            missing = [t for t in tickers if t not in results]
+            if missing:
+                logger.info("IDX snapshot miss: %d registry tickers missing, fallback", len(missing))
+                for ticker in missing:
+                    quote = await self._fetch_idx(ticker) or await self._fetch_yfinance(ticker)
+                    if quote:
+                        results[ticker] = quote
 
-        results: dict[str, QuoteData] = {}
-        missing: list[str] = []
+        # ── Step 3: Inject Metadata ────────────────────────────────────────
+        for ticker, quote in results.items():
+            if ticker not in self._metadata_cache:
+                self._discovered_tickers.add(ticker)
 
-        for ticker in tickers:
-            if ticker in snapshot:
-                results[ticker] = snapshot[ticker]
-            else:
-                missing.append(ticker)
-
-        logger.info(
-            "IDX snapshot: %d/%d hit, %d fallback ke yfinance",
-            len(results), len(tickers), len(missing),
-        )
-
-        if not results and missing:
-            logger.info(
-                "IDX snapshot kosong; mencoba fallback per-ticker IDX untuk %d ticker",
-                len(missing),
-            )
-            idx_recovered: list[str] = []
-            for ticker in list(missing):
-                quote = await self._fetch_idx(ticker)
-                if quote:
-                    results[ticker] = quote
-                    idx_recovered.append(ticker)
-                await asyncio.sleep(_IDX_BATCH_DELAY)
-            if idx_recovered:
-                missing = [ticker for ticker in missing if ticker not in results]
-                logger.info(
-                    "IDX per-ticker fallback recovered %d ticker",
-                    len(idx_recovered),
-                )
-
-        # Fallback yfinance untuk ticker yang tidak ada di snapshot IDX
-        # atau tetap gagal di endpoint per-ticker.
-        for ticker in missing:
-            quote = await self._fetch_yfinance(ticker)
-            if quote:
-                results[ticker] = quote
-            else:
-                logger.warning("No data for %s (IDX miss + yfinance fail)", ticker)
+            meta = self._metadata_cache.get(ticker)
+            if meta:
+                quote.name = meta.get("name", quote.name)
+                quote.sector = meta.get("sector", quote.sector)
+                quote.market_cap = meta.get("market_cap", quote.market_cap)
+                quote.fifty_two_week_high = meta.get("fifty_two_week_high", quote.fifty_two_week_high)
+                quote.fifty_two_week_low = meta.get("fifty_two_week_low", quote.fifty_two_week_low)
+                quote.pe_ratio = meta.get("pe_ratio", quote.pe_ratio)
+                quote.pbv_ratio = meta.get("pbv_ratio", quote.pbv_ratio)
+                quote.dividend_yield = meta.get("dividend_yield", quote.dividend_yield)
+                quote.avg_volume = meta.get("avg_volume", quote.avg_volume)
 
         return results
 
@@ -661,3 +760,27 @@ def _blocking_yfinance(ticker_jk: str) -> QuoteData | None:
 
     logger.warning("yfinance: semua period gagal untuk %s", ticker_jk)
     return None
+
+
+def _blocking_yfinance_info(ticker_jk: str) -> dict | None:
+    """Ambil metadata dari yfinance secara blocking."""
+    try:
+        tk = yf.Ticker(ticker_jk)
+        info = tk.info
+        if not info:
+            return None
+
+        return {
+            "name": info.get("longName") or info.get("shortName") or ticker_jk,
+            "sector": info.get("sector", ""),
+            "market_cap": info.get("marketCap", 0.0),
+            "fifty_two_week_high": info.get("fiftyTwoWeekHigh", 0.0),
+            "fifty_two_week_low": info.get("fiftyTwoWeekLow", 0.0),
+            "pe_ratio": info.get("trailingPE") or info.get("forwardPE") or 0.0,
+            "pbv_ratio": info.get("priceToBook") or 0.0,
+            "dividend_yield": info.get("dividendYield", 0.0),
+            "avg_volume": info.get("averageVolume", 0.0),
+        }
+    except Exception as exc:
+        logger.debug("yfinance info error %s: %s", ticker_jk, exc)
+        return None

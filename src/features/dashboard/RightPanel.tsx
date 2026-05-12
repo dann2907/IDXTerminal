@@ -47,9 +47,12 @@ const RightPanel = memo(function RightPanel({
                   <h4 className="text-xl font-black text-white">{selectedTicker.replace(".JK", "")}</h4>
                   <span className="text-xs font-mono font-bold text-slate-400">{fmtPrice(selectedQuote.price)}</span>
                 </div>
-                <p className={`text-[10px] font-bold mt-0.5 ${selectedQuote.change_pct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                  {selectedQuote.change_pct >= 0 ? "+" : ""}{selectedQuote.change_pct.toFixed(2)}%
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className={`text-[10px] font-bold mt-0.5 ${selectedQuote.change_pct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    {selectedQuote.change_pct >= 0 ? "+" : ""}{selectedQuote.change_pct.toFixed(2)}%
+                  </p>
+                  <span className="text-[8px] text-slate-500 font-bold uppercase">{selectedQuote.sector || "Unknown Sector"}</span>
+                </div>
               </div>
             ) : (
               <div className="mb-4 py-2 border border-dashed border-slate-800 rounded-lg text-center">
@@ -114,6 +117,34 @@ const RightPanel = memo(function RightPanel({
             </div>
           </div>
         </div>
+
+        {/* Key Metrics Section */}
+        {selectedQuote && (
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={14} className="text-slate-500" />
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Key Metrics</h3>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-slate-900/30 p-2.5 rounded-lg border border-slate-800/50">
+                <p className="text-[8px] font-bold text-slate-600 uppercase tracking-tight">Mkt Cap</p>
+                <p className="text-[10px] font-mono font-bold text-white mt-0.5">{fmtRp(selectedQuote.market_cap)}</p>
+              </div>
+              <div className="bg-slate-900/30 p-2.5 rounded-lg border border-slate-800/50">
+                <p className="text-[8px] font-bold text-slate-600 uppercase tracking-tight">P/E Ratio</p>
+                <p className="text-[10px] font-mono font-bold text-white mt-0.5">{selectedQuote.pe_ratio ? selectedQuote.pe_ratio.toFixed(1) : "—"}</p>
+              </div>
+              <div className="bg-slate-900/30 p-2.5 rounded-lg border border-slate-800/50">
+                <p className="text-[8px] font-bold text-slate-600 uppercase tracking-tight">PBV</p>
+                <p className="text-[10px] font-mono font-bold text-white mt-0.5">{selectedQuote.pbv_ratio ? selectedQuote.pbv_ratio.toFixed(1) : "—"}</p>
+              </div>
+              <div className="bg-slate-900/30 p-2.5 rounded-lg border border-slate-800/50">
+                <p className="text-[8px] font-bold text-slate-600 uppercase tracking-tight">Div Yield</p>
+                <p className="text-[10px] font-mono font-bold text-white mt-0.5">{selectedQuote.dividend_yield ? (selectedQuote.dividend_yield * 100).toFixed(2) + "%" : "—"}</p>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Portfolio Stats */}
         <section className="space-y-4">

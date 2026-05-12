@@ -1,25 +1,13 @@
-// src/components/portfolio/TradeHistory.tsx
-//
-// Tabel riwayat transaksi BUY/SELL.
-// Filter optional per ticker, sortir terbaru di atas.
+import { useState, useEffect, useMemo } from "react";
+import { usePortfolioStore } from "../../stores/usePortfolioStore";
+import { fmtPrice, fmtRp } from "../../features/dashboard/helpers/formatters";
+import { Filter, ChevronLeft, ChevronRight, History } from "lucide-react";
 
-import { useState, useEffect } from "react";
-import { usePortfolioStore, type TradeRecord } from "../../stores/usePortfolioStore";
-
-const fmtPrice  = (v: number) => v >= 1000 ? v.toLocaleString("id") : v.toString();
-const fmtRp     = (v: number) => {
-  const abs = Math.abs(v);
-  if (abs >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}M`;
-  if (abs >= 1_000_000)     return `${(v / 1_000_000).toFixed(2)}Jt`;
-  return `Rp${v.toLocaleString("id")}`;
-};
-const fmtDate   = (s: string) => s ? s.slice(0, 16).replace("T", " ") : "—";
-
+const fmtDate = (s: string) => s ? s.slice(0, 16).replace("T", " ") : "—";
 const PAGE_SIZE = 25;
 
 export default function TradeHistory() {
   const history     = usePortfolioStore(s => s.history);
-  const holdings    = usePortfolioStore(s => s.holdings);
   const fetchHistory = usePortfolioStore(s => s.fetchHistory);
 
   const [filterTicker, setFilterTicker] = useState("");
@@ -31,110 +19,107 @@ export default function TradeHistory() {
     setPage(1);
   }, [filterTicker, fetchHistory]);
 
-  const filtered = history.filter(t => {
+  const filtered = useMemo(() => history.filter(t => {
     if (filterAction && t.action !== filterAction) return false;
     return true;
-  });
+  }), [history, filterAction]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageData   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
   const allTickers = Array.from(new Set(history.map(t => t.ticker))).sort();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }}>
-
-      {/* ── Filter bar ── */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-        <span style={{ fontSize: 8, color: "#4a6080", letterSpacing: 2, fontFamily: "'Syne', sans-serif" }}>FILTER</span>
+    <div className="flex flex-col h-full space-y-4 overflow-hidden">
+      {/* Filter Bar */}
+      <div className="flex items-center gap-4 shrink-0 px-1">
+        <div className="flex items-center gap-2">
+          <Filter size={14} className="text-slate-500" />
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Filter</span>
+        </div>
 
         <select
           value={filterTicker}
           onChange={e => setFilterTicker(e.target.value)}
-          style={{
-            background: "#040d1a", border: "1px solid #0f2040", borderRadius: 3,
-            color: "#c8d8f0", fontSize: 10, padding: "4px 8px",
-            fontFamily: "'Space Mono', monospace", cursor: "pointer",
-          }}
+          className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-[10px] font-bold text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer min-w-[120px]"
         >
-          <option value="">Semua ticker</option>
+          <option value="">All Tickers</option>
           {allTickers.map(t => <option key={t} value={t}>{t.replace(".JK", "")}</option>)}
         </select>
 
-        <div style={{ display: "flex", gap: 4 }}>
+        <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg">
           {(["", "BUY", "SELL"] as const).map(a => (
-            <button key={a} onClick={() => { setFilterAction(a); setPage(1); }} style={{
-              padding:    "3px 10px",
-              fontSize:   9,
-              fontFamily: "'Syne', sans-serif",
-              fontWeight: 700,
-              border:     "1px solid #0f2040",
-              borderRadius: 3,
-              cursor:     "pointer",
-              background: filterAction === a ? (a === "BUY" ? "#00d68f22" : a === "SELL" ? "#ff456022" : "#2e8fdf22") : "transparent",
-              color:      filterAction === a ? (a === "BUY" ? "#00d68f" : a === "SELL" ? "#ff4560" : "#2e8fdf") : "#4a6080",
-            }}>
-              {a || "Semua"}
+            <button 
+              key={a} 
+              onClick={() => { setFilterAction(a); setPage(1); }} 
+              className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-md transition-all ${
+                filterAction === a ? "bg-slate-800 text-blue-400 shadow-sm" : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {a || "All"}
             </button>
           ))}
         </div>
 
-        <span style={{ marginLeft: "auto", fontSize: 9, color: "#4a6080" }}>
-          {filtered.length} transaksi
-        </span>
+        <span className="ml-auto text-[10px] font-bold text-slate-600 uppercase tracking-widest">{filtered.length} Transactions</span>
       </div>
 
-      {/* ── Tabel ── */}
-      <div style={{ flex: 1, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
-          <thead style={{ position: "sticky", top: 0, background: "#0c1520" }}>
-            <tr style={{ color: "#2a4060", borderBottom: "1px solid #0f2040" }}>
-              {["Tanggal", "Aksi", "Ticker", "Lot", "Harga", "Total", "Sumber"].map(h => (
-                <th key={h} style={{ textAlign: "left", padding: "5px 8px", fontWeight: 400, fontSize: 8, letterSpacing: 1, fontFamily: "'Syne', sans-serif" }}>{h}</th>
+      {/* Table Section */}
+      <div className="flex-1 bg-slate-900/30 border border-slate-800 rounded-xl overflow-auto shadow-sm">
+        <table className="w-full border-collapse">
+          <thead className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-sm">
+            <tr>
+              {["Date", "Action", "Ticker", "Lot", "Price", "Total", "Source"].map(h => (
+                <th key={h} className="text-left px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800">
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
-          <tbody>
-            {pageData.map(t => (
-              <tr key={t.id} style={{ borderBottom: "1px solid #0a1830" }}>
-                <td style={{ padding: "5px 8px", color: "#4a6080", fontSize: 9 }}>
-                  {fmtDate(t.traded_at)}
-                </td>
-                <td style={{ padding: "5px 8px" }}>
-                  <span style={{
-                    display:    "inline-block",
-                    padding:    "1px 7px",
-                    borderRadius: 3,
-                    fontSize:   9,
-                    fontWeight: 700,
-                    fontFamily: "'Syne', sans-serif",
-                    background: t.action === "BUY" ? "rgba(0,214,143,0.15)" : "rgba(255,69,96,0.15)",
-                    color:      t.action === "BUY" ? "#00d68f" : "#ff4560",
-                  }}>
-                    {t.action === "BUY" ? "▲ BUY" : "▼ SELL"}
-                  </span>
-                </td>
-                <td style={{ padding: "5px 8px", color: "#8aa8cc", fontWeight: 700 }}>
-                  {t.ticker.replace(".JK", "")}
-                </td>
-                <td style={{ padding: "5px 8px", color: "#c8d8f0" }}>
-                  {t.lots ?? Math.round(t.shares / 100)}
-                </td>
-                <td style={{ padding: "5px 8px", color: "#c8d8f0", fontFamily: "'Space Mono', monospace" }}>
-                  {fmtPrice(t.price)}
-                </td>
-                <td style={{ padding: "5px 8px", color: t.action === "BUY" ? "#ff4560" : "#00d68f", fontFamily: "'Space Mono', monospace" }}>
-                  {t.action === "SELL" ? "+" : "-"}{fmtRp(t.total)}
-                </td>
-                <td style={{ padding: "5px 8px", fontSize: 9, color: "#2a4060" }}>
-                  {t.source || "MANUAL"}
-                </td>
-              </tr>
-            ))}
-            {!pageData.length && (
+          <tbody className="divide-y divide-slate-800/50">
+            {pageData.length > 0 ? (
+              pageData.map(t => (
+                <tr key={t.id} className="h-[48px] hover:bg-slate-800/30 transition-colors">
+                  <td className="px-5 py-2 text-[10px] font-bold text-slate-500 font-mono">
+                    {fmtDate(t.traded_at)}
+                  </td>
+                  <td className="px-5 py-2">
+                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                      t.action === "BUY" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                    }`}>
+                      {t.action === "BUY" ? "Buy" : "Sell"}
+                    </span>
+                  </td>
+                  <td className="px-5 py-2 font-black text-xs text-blue-400 uppercase tracking-wide">
+                    {t.ticker.replace(".JK", "")}
+                  </td>
+                  <td className="px-5 py-2 text-xs font-bold text-slate-300">
+                    {t.lots ?? Math.round(t.shares / 100)} <span className="text-[10px] text-slate-600 font-bold ml-0.5 uppercase">Lot</span>
+                  </td>
+                  <td className="px-5 py-2 font-mono text-xs font-bold text-slate-300">
+                    {fmtPrice(t.price)}
+                  </td>
+                  <td className={`px-5 py-2 font-mono text-xs font-black ${t.action === "SELL" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {t.action === "SELL" ? "+" : "-"}{fmtRp(t.total)}
+                  </td>
+                  <td className="px-5 py-2">
+                    <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest bg-slate-800/50 px-2 py-0.5 rounded border border-slate-700/50">
+                      {t.source || "MANUAL"}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            ) : (
               <tr>
-                <td colSpan={7} style={{ padding: "16px 8px", color: "#2a4060", textAlign: "center" }}>
-                  Tidak ada transaksi
+                <td colSpan={7} className="py-24 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="p-4 bg-slate-900/50 rounded-full border border-slate-800 text-slate-700">
+                      <History size={32} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-widest">No Transactions</p>
+                      <p className="text-[10px] font-bold text-slate-600 mt-1 uppercase tracking-tight">Your trade history will appear here</p>
+                    </div>
+                  </div>
                 </td>
               </tr>
             )}
@@ -142,30 +127,26 @@ export default function TradeHistory() {
         </table>
       </div>
 
-      {/* ── Pagination ── */}
+      {/* Pagination */}
       {totalPages > 1 && (
-        <div style={{ display: "flex", gap: 6, justifyContent: "center", flexShrink: 0, paddingTop: 4 }}>
+        <div className="flex items-center justify-center gap-4 py-2 shrink-0">
           <button
             disabled={page === 1}
             onClick={() => setPage(p => p - 1)}
-            style={{
-              padding: "3px 10px", fontSize: 9, cursor: page === 1 ? "default" : "pointer",
-              background: "transparent", border: "1px solid #0f2040", borderRadius: 3,
-              color: page === 1 ? "#2a4060" : "#8aa8cc",
-            }}
-          >← Prev</button>
-          <span style={{ fontSize: 9, color: "#4a6080", alignSelf: "center" }}>
-            {page} / {totalPages}
+            className="p-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+            Page <span className="text-blue-400">{page}</span> of {totalPages}
           </span>
           <button
             disabled={page === totalPages}
             onClick={() => setPage(p => p + 1)}
-            style={{
-              padding: "3px 10px", fontSize: 9, cursor: page === totalPages ? "default" : "pointer",
-              background: "transparent", border: "1px solid #0f2040", borderRadius: 3,
-              color: page === totalPages ? "#2a4060" : "#8aa8cc",
-            }}
-          >Next →</button>
+            className="p-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+          >
+            <ChevronRight size={16} />
+          </button>
         </div>
       )}
     </div>

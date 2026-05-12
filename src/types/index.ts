@@ -10,6 +10,17 @@ export interface QuoteData {
   volume: number;
   timestamp: string;
   is_live: boolean;
+  // Metadata & Fundamentals
+  name?: string;
+  sector?: string;
+  industry?: string;
+  market_cap?: number;
+  fifty_two_week_high?: number;
+  fifty_two_week_low?: number;
+  pe_ratio?: number;
+  pbv_ratio?: number;
+  dividend_yield?: number;
+  avg_volume?: number; // 30d avg
 }
 
 export interface CandleData {

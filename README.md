@@ -6,53 +6,43 @@ Built with Tauri + React/TypeScript + Python FastAPI.
 ## Tech Stack
 
 | Layer        | Tech                              |
-|--------------|-----------------------------------|
+|--------------|--------------|
 | Desktop Shell| Tauri 2.x (Rust)                  |
 | Frontend     | React 18 + TypeScript + Vite      |
-| Styling      | Tailwind CSS + custom CSS vars    |
+| Shell Layout | CSS Grid (3-Column Architecture)  |
+| Styling      | Tailwind CSS                      |
 | State        | Zustand                           |
 | Charts       | lightweight-charts (TradingView)  |
 | Backend      | Python FastAPI (sidecar)          |
 | Database     | SQLite via SQLAlchemy             |
 | Data IDX     | idx.co.id API + yfinance          |
-| Real-time    | WebSocket (FastAPI)               |
-| Auth         | JWT + bcrypt (lokal)             |
+| Real-time    | WebSocket (MsgPack Serialization) |
+
+## Key Features
+
+- **Professional App Shell**: Stable 3-column layout (Sidebar, Main, Execution Panel).
+- **Interactive Portfolio**: Real-time holdings tracking with P&L heat highlighting and column toggles.
+- **Advanced Performance Analytics**:
+  - Cumulative P&L Equity Curve with rolling period support (Day, Week, Month).
+  - Win Rate tracking and asset-level performance breakdown.
+  - Interactive data series with tooltip drill-downs.
+- **Automated Orders**: Take Profit (TP) and Stop Loss (SL) triggers with backend monitoring.
+- **Real-time Feed**: Pinned bottom ticker for live market updates.
 
 ## Project Structure
 
 ```
 idx-terminal/
 ├── backend/                  # FastAPI (API + WS + DB)
-│   ├── main.py               # Entry point (app setup)
-│   ├── core/                 # Singleton container & system core
+│   ├── main.py               # Entry point
 │   ├── routers/              # auth, market, portfolio, alerts
-│   ├── services/             # business logic (auth, data, ws)
-│   ├── models/               # SQLAlchemy models
-│   ├── db/                   # database setup
-│   └── tests/                # restructured services/routers/integration tests
-│
+│   ├── services/             # business logic (portfolio_service, data_fetcher)
+│   └── models/               # SQLAlchemy models
 ├── src/                      # React frontend
-│   ├── App.tsx
-│   ├── features/
-│   │   └── dashboard/        # normalized dashboard (UI + logic)
-│   ├── components/           # shared UI components
-│   │   ├── chart/
-│   │   ├── portfolio/
-│   │   ├── market/
-│   │   ├── alerts/
-│   │   └── auth/
-│   ├── stores/               # Zustand state
-│   ├── lib/                  # API + WebSocket client
-│   └── hooks/
-│
-├── src-tauri/                # Desktop shell (Tauri)
-├── scripts/                  # utilities (migration, etc)
-├── tests/
-├── index.html
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-└── tsconfig.node.json
+│   ├── features/dashboard/   # Core app shell and dashboard pages
+│   ├── components/           # Shared components (charts, trade dialogs)
+│   └── stores/               # Zustand (usePortfolioStore, useMarketStore)
+└── src-tauri/                # Desktop shell (Rust)
 ```
 
 ## Setup
@@ -66,10 +56,10 @@ cd backend && pip install -r requirements.txt && cd ..
 npm run tauri dev
 ```
 
-## Fase Development
+## Development Status
 
-- Fase 1 (M1-2): Foundation — Tauri setup, auth, SQLite, layout
-- Fase 2 (M3-4): Data Layer — WebSocket, IDX API, yfinance
-- Fase 3 (M5-6): Core Trading — Portfolio, alerts, watchlist
-- Fase 4 (M7-8): Visualization — Charts, heatmap, screener
-- Fase 5 (M9-10): Polish — PDF/Excel export, animations, installer
+- ✅ **Fase 1**: Foundation — Tauri, Auth, Layout Architecture.
+- ✅ **Fase 2**: Data Layer — WebSocket snapshots, IDX integration.
+- ✅ **Fase 3**: Core Trading — Watchlist management, Portfolio tracking.
+- ✅ **Fase 4**: Visualization — High-fidelity charts, Performance polishing.
+- 🚧 **Fase 5 (Active)**: Documentation & UX Stabilization.

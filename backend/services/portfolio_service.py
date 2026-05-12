@@ -20,6 +20,7 @@
 #     TP/SL sebelumnya)
 
 import uuid
+import math
 from datetime import datetime
 from typing import Optional
 
@@ -51,6 +52,17 @@ def _to_shares(lots: int) -> int:
 
 def _to_lots(shares: int) -> int:
     return shares // LOT_SIZE
+
+
+def _sanitize_float(v: any, default: float = 0.0) -> float:
+    """Pastikan nilai adalah float valid (bukan NaN/Inf) agar JSON compliant."""
+    try:
+        f = float(v)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return f
+    except (TypeError, ValueError):
+        return default
 
 
 # ── PortfolioService ──────────────────────────────────────────────────────────
@@ -154,10 +166,10 @@ class PortfolioService:
             "available_shares": available_shares,
             "locked_by_tp": _to_lots(tp_locked) if is_idx else tp_locked,
             "locked_by_sl": _to_lots(sl_locked) if is_idx else sl_locked,
-            "avg_cost": holding.avg_cost,
-            "current_price": cur_price,
-            "pnl_pct": round(((cur_price - holding.avg_cost) / holding.avg_cost * 100)
-                             if holding.avg_cost else 0, 2),
+            "avg_cost": _sanitize_float(holding.avg_cost),
+            "current_price": _sanitize_float(cur_price),
+            "pnl_pct": _sanitize_float(round(((cur_price - holding.avg_cost) / holding.avg_cost * 100)
+                             if holding.avg_cost else 0, 2)),
             "active_orders": [
                 {
                     "order_id": o.order_id,
@@ -253,11 +265,11 @@ class PortfolioService:
         realized = total_value - meta.starting_cash - floating
 
         return {
-            "cash": round(meta.cash, 2),
-            "starting_cash": round(meta.starting_cash, 2),
-            "total_value": round(total_value, 2),
-            "floating_pnl": round(floating, 2),
-            "realized_pnl": round(realized, 2),
+            "cash": _sanitize_float(round(meta.cash, 2)),
+            "starting_cash": _sanitize_float(round(meta.starting_cash, 2)),
+            "total_value": _sanitize_float(round(total_value, 2)),
+            "floating_pnl": _sanitize_float(round(floating, 2)),
+            "realized_pnl": _sanitize_float(round(realized, 2)),
         }
 
     # ── Holdings ──────────────────────────────────────────────────────────────
@@ -276,11 +288,11 @@ class PortfolioService:
                 "ticker": h.ticker,
                 "shares": h.shares,
                 "lots": _to_lots(h.shares) if _is_idx(h.ticker) else None,
-                "avg_cost": round(h.avg_cost, 2),
-                "current_price": round(cur, 2),
-                "market_value": round(market_val, 2),
-                "pnl_rp": round(pnl_rp, 2),
-                "pnl_pct": round(pnl_pct, 2),
+                "avg_cost": _sanitize_float(round(h.avg_cost, 2)),
+                "current_price": _sanitize_float(round(cur, 2)),
+                "market_value": _sanitize_float(round(market_val, 2)),
+                "pnl_rp": _sanitize_float(round(pnl_rp, 2)),
+                "pnl_pct": _sanitize_float(round(pnl_pct, 2)),
                 "first_buy": h.first_buy.isoformat() if h.first_buy else None,
             })
         return out
@@ -993,7 +1005,7 @@ class PortfolioService:
         for item in items:
             items_by_category.setdefault(item.category_id, []).append({
                 "ticker": item.ticker,
-                "price": prices.get(item.ticker) if prices else None,
+                "price": _sanitize_float(prices.get(item.ticker)) if prices else None,
             })
 
         return [
@@ -1031,21 +1043,21 @@ class PortfolioService:
         history = result.scalars().all()
 
         now = datetime.utcnow()
+        from datetime import timedelta
         if period == "day":
             cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
         elif period == "week":
-            from datetime import timedelta
-            cutoff = (now - timedelta(days=now.weekday())).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            cutoff = now - timedelta(days=7)
         elif period == "month":
-            cutoff = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            cutoff = now - timedelta(days=30)
         else:
             cutoff = None
 
         inventory: dict[str, dict] = {}
         stats: dict[str, dict] = {}
         trade_results: list[float] = []
+        pnl_series: list[dict] = []
+        cumulative_period_pnl = 0.0
 
         for trade in history:
             ticker = trade.ticker
@@ -1082,6 +1094,12 @@ class PortfolioService:
                     s["realized"] += realized
                     s["realized_modal"] += modal
                     trade_results.append(realized)
+                    
+                    cumulative_period_pnl += realized
+                    pnl_series.append({
+                        "date": trade.traded_at.isoformat(),
+                        "pnl": round(cumulative_period_pnl, 2)
+                    })
 
         for ticker_key, s in stats.items():
             modal = s["realized_modal"]
@@ -1104,12 +1122,14 @@ class PortfolioService:
             "period": period,
             "by_ticker": stats,
             "per_ticker": stats,
-            "floating_pnl": round(floating, 2),
-            "total_realized": round(sum(s["pnl_rp"] for s in stats.values()), 2),
-            "win_rate": round(win_rate, 2),
+            "pnl_series": pnl_series,
+            "floating_pnl": _sanitize_float(round(floating, 2)),
+            "total_realized": _sanitize_float(round(sum(s["pnl_rp"] for s in stats.values()), 2)),
+            "win_rate": _sanitize_float(round(win_rate, 2)),
+            "win_count": wins,
             "total_trades": len(trade_results),
-            "best_trade": round(max(trade_results), 2) if trade_results else 0,
-            "worst_trade": round(min(trade_results), 2) if trade_results else 0,
+            "best_trade": _sanitize_float(round(max(trade_results), 2)) if trade_results else 0,
+            "worst_trade": _sanitize_float(round(min(trade_results), 2)) if trade_results else 0,
         }
 
 def _empty_stat() -> dict:

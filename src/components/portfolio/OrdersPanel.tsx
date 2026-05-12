@@ -1,91 +1,17 @@
-// src/components/portfolio/OrdersPanel.tsx
-//
-// Panel manajemen order TP/SL:
-//   - Tabel order aktif (ACTIVE + PENDING_CONFIRM)
-//   - Form tambah order baru
-//   - Tombol cancel per order dengan inline confirmation
-//
-// UX Fixes:
-//   - Cancel order: inline confirmation (tidak ada accidental delete)
-//   - Lot explanation: "1 lot = 100 lembar saham"
-//   - Price guidance: tampilkan kisaran harga yang valid
-//   - Error message: persist sampai user dismiss
-//   - Success: auto-clear setelah 6 detik
-//   - Font sizes: min 11px untuk keterbacaan
-
 import { useState, useEffect, useRef } from "react";
-import { usePortfolioStore, type PortfolioOrder } from "../../stores/usePortfolioStore";
+import { usePortfolioStore } from "../../stores/usePortfolioStore";
 import { useMarketStore } from "../../stores/useMarketStore";
+import { fmtPrice, fmtRp } from "../../features/dashboard/helpers/formatters";
+import { Info, Plus, Trash2, CheckCircle2, Clock, AlertTriangle, ArrowUpRight, ArrowDownRight } from "lucide-react";
 
-// ── Shared styles ─────────────────────────────────────────────────────────────
-
-const INPUT: React.CSSProperties = {
-  width:        "100%",
-  background:   "#040d1a",
-  border:       "1px solid #0f2040",
-  borderRadius: 3,
-  color:        "#c8d8f0",
-  fontFamily:   "'Space Mono', monospace",
-  fontSize:     11,
-  padding:      "6px 8px",
-  outline:      "none",
-  marginBottom: 6,
-  boxSizing:    "border-box" as const,
+const STATUS_CONFIG: Record<string, { color: string, bg: string, icon: any, label: string }> = {
+  ACTIVE:          { color: "text-blue-400", bg: "bg-blue-500/10", icon: Clock, label: "Active" },
+  PENDING_CONFIRM: { color: "text-amber-400", bg: "bg-amber-500/10", icon: AlertTriangle, label: "Confirming" },
+  EXECUTED:        { color: "text-emerald-400", bg: "bg-emerald-500/10", icon: CheckCircle2, label: "Executed" },
+  CANCELLED:       { color: "text-slate-500", bg: "bg-slate-800/50", icon: Trash2, label: "Cancelled" },
 };
 
-const BADGE = (type: "TP" | "SL"): React.CSSProperties => ({
-  display:      "inline-block",
-  padding:      "2px 7px",
-  borderRadius: 3,
-  fontSize:     10,
-  fontWeight:   700,
-  background:   type === "TP" ? "rgba(0,214,143,0.15)" : "rgba(255,69,96,0.15)",
-  color:        type === "TP" ? "#00d68f" : "#ff4560",
-  border:       `1px solid ${type === "TP" ? "rgba(0,214,143,0.3)" : "rgba(255,69,96,0.3)"}`,
-});
-
-const STATUS_COLOR: Record<string, string> = {
-  ACTIVE:          "#4a6080",
-  PENDING_CONFIRM: "#f59e0b",
-  EXECUTED:        "#00d68f",
-  CANCELLED:       "#2a4060",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  ACTIVE:          "Aktif",
-  PENDING_CONFIRM: "⚡ Menunggu Konfirmasi",
-  EXECUTED:        "✅ Terlaksana",
-  CANCELLED:       "Dibatalkan",
-};
-
-const fmtPrice = (v: number) => v >= 1_000 ? v.toLocaleString("id") : v.toString();
 const fmtDate  = (s: string) => s ? s.slice(0, 16).replace("T", " ") : "—";
-const fmtRp    = (v: number) => {
-  if (isNaN(v) || !isFinite(v)) return "—";
-  const abs = Math.abs(v);
-  if (abs >= 1_000_000_000) return `Rp${(v / 1_000_000_000).toFixed(1)}M`;
-  if (abs >= 1_000_000)     return `Rp${(v / 1_000_000).toFixed(2)}Jt`;
-  return `Rp${v.toLocaleString("id")}`;
-};
-
-function SkeletonRow() {
-  return (
-    <tr style={{ borderBottom: "1px solid #0a1830" }}>
-      {[90, 50, 100, 70, 110, 80, 70].map((w, i) => (
-        <td key={i} style={{ padding: "7px 8px" }}>
-          <div style={{
-            height: 10, width: w, borderRadius: 3,
-            background: "#0d1e35",
-            animation: "skeletonPulse 1.5s ease-in-out infinite",
-            animationDelay: `${i * 0.08}s`,
-          }} />
-        </td>
-      ))}
-    </tr>
-  );
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function OrdersPanel() {
   const orders      = usePortfolioStore(s => s.orders);
@@ -97,22 +23,16 @@ export default function OrdersPanel() {
   const cancelOrder = usePortfolioStore(s => s.cancelOrder);
   const quotes      = useMarketStore(s => s.quotes);
 
-  // Form state
   const [formTicker, setFormTicker]   = useState("");
   const [formType, setFormType]       = useState<"TP" | "SL">("TP");
   const [formPrice, setFormPrice]     = useState("");
   const [formLots, setFormLots]       = useState("");
   const [formMsg, setFormMsg]         = useState<{ ok: boolean; message: string } | null>(null);
   const [submitting, setSubmitting]   = useState(false);
-
-  // Cancel confirmation state: orderId yang sedang menunggu konfirmasi
   const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
   const [cancelling, setCancelling]           = useState(false);
-
-  // Filter state
   const [filterStatus, setFilterStatus] = useState<"active" | "all">("active");
 
-  // Auto-clear success message setelah 6 detik; error tetap sampai dismiss
   const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (formMsg?.ok) {
@@ -123,32 +43,24 @@ export default function OrdersPanel() {
   }, [formMsg]);
 
   useEffect(() => {
-      fetchOrders();
-      fetchHoldings();
-    }, [fetchOrders, fetchHoldings]);
+    fetchOrders();
+    fetchHoldings();
+  }, [fetchOrders, fetchHoldings]);
 
   const filteredOrders = filterStatus === "active"
     ? orders.filter(o => o.status === "ACTIVE" || o.status === "PENDING_CONFIRM")
     : orders;
 
-  // Holding yang dipilih di form
   const selectedHolding = holdings.find(h => h.ticker === formTicker);
   const currentQuote = quotes[formTicker];
-
-  // Harga saran: TP harus di atas avg_cost, SL di bawah
   const avgCost = selectedHolding?.avg_cost ?? 0;
-  const priceHint = formType === "TP"
-    ? avgCost > 0 ? `Harus > ${fmtPrice(avgCost)} (avg cost)` : null
-    : avgCost > 0 ? `Harus < ${fmtPrice(avgCost)} (avg cost)` : null;
-
-  // Validasi harga sebelum submit
+  
   const priceNum  = parseFloat(formPrice);
   const lotsNum = parseInt(formLots, 10);
   const priceValid = !formPrice || !avgCost
     ? true
     : formType === "TP" ? priceNum > avgCost : priceNum < avgCost;
 
-  // FIX 4: guard NaN
   const estimatedValue = !isNaN(priceNum) && !isNaN(lotsNum) && priceNum > 0 && lotsNum > 0
     ? priceNum * lotsNum * 100
     : null;
@@ -168,432 +80,262 @@ export default function OrdersPanel() {
     setSubmitting(false);
   };
 
-  const handleCancelClick = (orderId: string) => {
-    // Tampilkan inline confirmation
-    setPendingCancelId(orderId);
-  };
-
-  const handleCancelConfirm = async () => {
-      if (!pendingCancelId || cancelling) return;
-      setCancelling(true);
-      await cancelOrder(pendingCancelId);
-      setPendingCancelId(null);
-      setCancelling(false);
-    };
-
-  const isOrdersLoading = loading.orders && orders.length === 0;
-
-  const handleCancelAbort = () => {
-    setPendingCancelId(null);
-  };
-
   return (
-    <>
-      <style>{`
-        @keyframes skeletonPulse {
-          0%, 100% { opacity: 0.4; }
-          50%       { opacity: 0.8; }
-        }
-      `}</style>
-
-      <div style={{ display: "flex", gap: 12, height: "100%", overflow: "hidden" }}>
-
-        {/* ── Kiri: Tabel order ── */}
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {/* Filter bar */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: "#4a6080", letterSpacing: 1, fontFamily: "'Syne', sans-serif" }}>
-              TAMPILKAN
-            </span>
+    <div className="flex gap-6 h-full overflow-hidden">
+      {/* Table Section */}
+      <div className="flex-1 flex flex-col min-w-0 space-y-4 overflow-hidden">
+        <div className="flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg">
             {(["active", "all"] as const).map(f => (
-              <button key={f} onClick={() => setFilterStatus(f)} style={{
-                padding:    "4px 12px",
-                fontSize:   11,
-                fontFamily: "'Syne', sans-serif",
-                fontWeight: 700,
-                border:     "1px solid #0f2040",
-                borderRadius: 3,
-                cursor:     "pointer",
-                background: filterStatus === f ? "#2e8fdf22" : "transparent",
-                color:      filterStatus === f ? "#2e8fdf" : "#4a6080",
-              }}>
-                {f === "active" ? "Aktif" : "Semua"}
+              <button 
+                key={f} 
+                onClick={() => setFilterStatus(f)} 
+                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-md transition-all ${
+                  filterStatus === f ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {f === "active" ? "Active" : "History"}
               </button>
             ))}
-            <span style={{ marginLeft: "auto", fontSize: 11, color: "#4a6080" }}>
-              {filteredOrders.length} order
-            </span>
           </div>
+          <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">{filteredOrders.length} Orders Found</span>
+        </div>
 
-          {/* Tabel */}
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-            <thead>
-              <tr style={{ color: "#4a6080", borderBottom: "1px solid #0f2040" }}>
-                {["Ticker", "Tipe", "Harga Trigger", "Lot", "Status", "Dibuat", ""].map(h => (
-                  <th key={h} style={{
-                    textAlign: "left", padding: "5px 8px",
-                    fontWeight: 400, fontSize: 10, letterSpacing: 1,
-                    fontFamily: "'Syne', sans-serif",
-                  }}>{h}</th>
+        <div className="flex-1 bg-slate-900/30 border border-slate-800 rounded-xl overflow-auto shadow-sm">
+          <table className="w-full border-collapse">
+            <thead className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-sm">
+              <tr>
+                {["Ticker", "Type", "Trigger", "Qty", "Status", "Date", ""].map(h => (
+                  <th key={h} className="text-left px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800">
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
-                {isOrdersLoading && Array.from({ length: 4 }, (_, i) => <SkeletonRow key={i} />)}
- 
-
-              {!isOrdersLoading && filteredOrders.map(order => {
+            <tbody className="divide-y divide-slate-800/50">
+              {loading.orders && filteredOrders.length === 0 ? (
+                [...Array(4)].map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    <td colSpan={7} className="px-5 py-4"><div className="h-4 bg-slate-800 rounded w-full opacity-20"></div></td>
+                  </tr>
+                ))
+              ) : filteredOrders.map(order => {
+                const conf = STATUS_CONFIG[order.status] || STATUS_CONFIG.ACTIVE;
                 const isCancelPending = pendingCancelId === order.order_id;
                 const canCancel = order.status === "ACTIVE" || order.status === "PENDING_CONFIRM";
+                
                 return (
-                  <tr key={order.order_id} style={{ borderBottom: "1px solid #0a1830" }}>
-                    <td style={{ padding: "7px 8px", color: "#8aa8cc", fontWeight: 700 }}>
+                  <tr key={order.order_id} className="group hover:bg-slate-800/30 transition-colors h-[52px]">
+                    <td className="px-5 py-3 font-black text-xs text-blue-400 uppercase tracking-wide">
                       {order.ticker.replace(".JK", "")}
                     </td>
-                    <td style={{ padding: "7px 8px" }}>
-                      <span style={BADGE(order.order_type)}>{order.order_type}</span>
-                    </td>
-                    <td style={{ padding: "7px 8px", color: "#c8d8f0", fontFamily: "'Space Mono', monospace" }}>
-                      {fmtPrice(order.trigger_price)}
-                      {quotes[order.ticker] && (
-                        <span style={{ color: "#4a6080", marginLeft: 4, fontSize: 10 }}>
-                          / saat ini: {fmtPrice(quotes[order.ticker].price)}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: "7px 8px", color: "#c8d8f0" }}>
-                      {order.lots} lot
-                      <span style={{ color: "#4a6080", fontSize: 10, marginLeft: 3 }}>
-                        ({(order.lots * 100).toLocaleString()} lbr)
+                    <td className="px-5 py-3">
+                      <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                        order.order_type === "TP" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                      }`}>
+                        {order.order_type === "TP" ? "Profit" : "Loss"}
                       </span>
                     </td>
-                    <td style={{ padding: "7px 8px" }}>
-                      <span style={{ fontSize: 10, color: STATUS_COLOR[order.status] ?? "#4a6080" }}>
-                        {STATUS_LABEL[order.status] ?? order.status}
-                      </span>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-mono font-bold text-white">{fmtPrice(order.trigger_price)}</span>
+                        {quotes[order.ticker] && (
+                          <span className="text-[10px] text-slate-500 font-medium">Last: {fmtPrice(quotes[order.ticker].price)}</span>
+                        )}
+                      </div>
                     </td>
-
-                    <td style={{ padding: "7px 8px", color: "#4a6080", fontSize: 10 }}>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-300">{order.lots} <span className="text-[10px] text-slate-600 uppercase">Lots</span></span>
+                        <span className="text-[9px] text-slate-600">{(order.lots * 100).toLocaleString()} shares</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg ${conf.bg}`}>
+                        <conf.icon size={12} className={conf.color} />
+                        <span className={`text-[10px] font-black uppercase tracking-tight ${conf.color}`}>{conf.label}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-[10px] font-bold text-slate-600 font-mono">
                       {fmtDate(order.created_at)}
                     </td>
-
-                    <td style={{ padding: "7px 8px", minWidth: 150 }}>
-                      {canCancel && !isCancelPending && (
-                        <button onClick={() => handleCancelClick(order.order_id)} style={{
-                          padding:    "3px 10px",
-                          fontSize:   10,
-                          fontFamily: "'Syne', sans-serif",
-                          background: "rgba(255,69,96,0.08)",
-                          color:      "#ff4560",
-                          border:     "1px solid rgba(255,69,96,0.25)",
-                          borderRadius: 3,
-                          cursor:     "pointer",
-                        }}>
-                          Batalkan
-                        </button>
-                      )}
-
-                      {/* Inline confirmation — no accidental delete */}
-                      {canCancel && isCancelPending && (
-                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                          <span style={{ fontSize: 10, color: "#f59e0b", marginRight: 2 }}>Yakin?</span>
-                          
-                          <button onClick={handleCancelConfirm} disabled={cancelling} style={{
-                            padding:    "2px 8px",
-                            fontSize:   10,
-                            fontFamily: "'Syne', sans-serif",
-                            background: "rgba(255,69,96,0.15)",
-                            color:      "#ff4560",
-                            border:     "1px solid rgba(255,69,96,0.4)",
-                            borderRadius: 3,
-                            cursor:     cancelling ? "not-allowed" : "pointer",
-                            opacity:    cancelling ? 0.6 : 1,
-                          }}>
-                            {cancelling ? "..." : "Ya, Batalkan"}
+                    <td className="px-5 py-3 text-right">
+                      {canCancel && (
+                        isCancelPending ? (
+                          <div className="flex items-center justify-end gap-2 animate-in fade-in slide-in-from-right-2">
+                             <span className="text-[9px] font-black text-amber-500 uppercase tracking-tighter">Cancel?</span>
+                             <button 
+                               onClick={async () => {
+                                 setCancelling(true);
+                                 await cancelOrder(order.order_id);
+                                 setPendingCancelId(null);
+                                 setCancelling(false);
+                               }}
+                               disabled={cancelling}
+                               className="px-2 py-1 bg-rose-600 text-white text-[9px] font-black uppercase rounded hover:bg-rose-500 transition-colors"
+                             >
+                               Yes
+                             </button>
+                             <button onClick={() => setPendingCancelId(null)} className="px-2 py-1 bg-slate-800 text-slate-400 text-[9px] font-black uppercase rounded hover:bg-slate-700 transition-colors">
+                               No
+                             </button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setPendingCancelId(order.order_id)} className="p-1.5 text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                            <Trash2 size={16} />
                           </button>
-                          <button onClick={handleCancelAbort} disabled={cancelling} style={{
-                            padding:    "2px 8px",
-                            fontSize:   10,
-                            fontFamily: "'Syne', sans-serif",
-                            background: "transparent",
-                            color:      "#4a6080",
-                            border:     "1px solid #0f2040",
-                            borderRadius: 3,
-                            cursor:     "pointer",
-                          }}>
-                            Tidak
-                          </button>
-                        </div>
+                        )
                       )}
                     </td>
                   </tr>
                 );
               })}
-
-              {/* FIX 6: Empty state lebih helpful */}
-              {!isOrdersLoading && filteredOrders.length === 0 && (
+              {!loading.orders && filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: "32px 8px", textAlign: "center" }}>
-                    <div style={{ fontSize: 20, marginBottom: 8 }}>📋</div>
-                    <div style={{ fontSize: 12, color: "#4a6080", marginBottom: 4 }}>
-                      {filterStatus === "active" ? "Tidak ada order aktif" : "Belum ada riwayat order"}
+                  <td colSpan={7} className="py-24 text-center">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="p-4 bg-slate-900/50 rounded-full border border-slate-800 text-slate-700">
+                        <Clock size={32} />
+                      </div>
+                      <div className="max-w-[200px]">
+                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest">No Active Orders</p>
+                        <p className="text-[10px] font-bold text-slate-600 mt-1 uppercase tracking-tight">Automate your trades by setting TP/SL triggers</p>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 10, color: "#2a4060", lineHeight: 1.6 }}>
-                      {filterStatus === "active"
-                        ? "Pasang TP atau SL dari panel kanan untuk otomatisasi jual saham Anda"
-                        : "Order yang pernah dipasang akan muncul di sini"}
-                    </div>
-                  </td>
-                </tr>
-              )}
-
-              {!filteredOrders.length && (
-                <tr>
-                  <td colSpan={7} style={{ padding: "24px 8px", color: "#4a6080", textAlign: "center", fontSize: 11 }}>
-                    {filterStatus === "active"
-                      ? "Belum ada order aktif — pasang TP atau SL di panel kanan"
-                      : "Belum ada riwayat order"}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+      </div>
 
-        {/* ── Kanan: Form tambah order ── */}
-        <div style={{
-          width:       240,
-          flexShrink:  0,
-          background:  "#070d1c",
-          border:      "1px solid #0f2040",
-          borderRadius: 6,
-          padding:     14,
-          alignSelf:   "flex-start",
-        }}>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 11, letterSpacing: 1, color: "#4a6080", marginBottom: 12 }}>
-            PASANG ORDER BARU
+      {/* Form Section */}
+      <div className="w-72 shrink-0 flex flex-col space-y-4">
+        <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col space-y-5">
+          <div className="flex items-center gap-2">
+            <Plus size={16} className="text-blue-500" />
+            <h3 className="text-xs font-black uppercase tracking-widest text-white">Create Trigger</h3>
           </div>
 
-          {/* Tipe TP/SL */}
-          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+          {/* Type Toggle */}
+          <div className="flex p-1 bg-slate-950 rounded-lg gap-1">
             {(["TP", "SL"] as const).map(t => (
-              <button key={t} onClick={() => setFormType(t)} style={{
-                flex:       1,
-                padding:    "7px 0",
-                fontSize:   11,
-                fontFamily: "'Syne', sans-serif",
-                fontWeight: 700,
-                border:     "none",
-                borderRadius: 3,
-                cursor:     "pointer",
-                background: formType === t
-                  ? (t === "TP" ? "#00d68f33" : "#ff456033")
-                  : "#0a1628",
-                color: formType === t
-                  ? (t === "TP" ? "#00d68f" : "#ff4560")
-                  : "#4a6080",
-                borderTop: `2px solid ${formType === t ? (t === "TP" ? "#00d68f" : "#ff4560") : "transparent"}`,
-              }}>
-                {t === "TP" ? "📈 Take Profit" : "🛡️ Stop Loss"}
+              <button 
+                key={t} 
+                onClick={() => setFormType(t)}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black rounded-md transition-all ${
+                  formType === t 
+                    ? (t === "TP" ? "bg-emerald-500 text-slate-950 shadow-lg" : "bg-rose-500 text-slate-950 shadow-lg") 
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {t === "TP" ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+                {t === "TP" ? "TAKE PROFIT" : "STOP LOSS"}
               </button>
             ))}
           </div>
 
-          {/* Penjelasan singkat */}
-          <div style={{
-            background:   formType === "TP" ? "rgba(0,214,143,0.05)" : "rgba(255,69,96,0.05)",
-            border:       `1px solid ${formType === "TP" ? "rgba(0,214,143,0.15)" : "rgba(255,69,96,0.15)"}`,
-            borderRadius: 3,
-            padding:      "6px 8px",
-            fontSize:     10,
-            color:        "#4a6080",
-            marginBottom: 10,
-            lineHeight:   1.5,
-          }}>
-            {formType === "TP"
-              ? "📈 Take Profit: jual otomatis saat harga naik ke target."
-              : "🛡️ Stop Loss: jual otomatis saat harga turun ke batas."}
+          <div className={`p-3 rounded-lg border flex gap-3 ${
+            formType === "TP" ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-500/80" : "bg-rose-500/5 border-rose-500/20 text-rose-500/80"
+          }`}>
+            <Info size={16} className="shrink-0 mt-0.5" />
+            <p className="text-[10px] font-bold leading-relaxed uppercase tracking-tight">
+              {formType === "TP" ? "Sell automatically when price rises to target." : "Sell automatically when price drops to limit."}
+            </p>
           </div>
 
-          {/* Ticker dari holdings */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, color: "#4a6080", marginBottom: 4, fontFamily: "'Syne', sans-serif" }}>
-              PILIH SAHAM
+          {/* Form Fields */}
+          <div className="space-y-4">
+            {/* Symbol Select */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Target Asset</label>
+              <select
+                value={formTicker}
+                onChange={e => { setFormTicker(e.target.value); setFormPrice(""); }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer"
+              >
+                <option value="">Select from holdings...</option>
+                {holdings.map(h => (
+                  <option key={h.ticker} value={h.ticker}>
+                    {h.ticker.replace(".JK", "")} (Avg: {fmtPrice(h.avg_cost)})
+                  </option>
+                ))}
+              </select>
             </div>
-            <select
-              value={formTicker}
-              onChange={e => { setFormTicker(e.target.value); setFormPrice(""); }}
-              style={{ ...INPUT, marginBottom: 0, cursor: "pointer" }}
-            >
-              <option value="">Pilih saham dari holdings...</option>
 
-              {holdings.map(h => (
-                <option key={h.ticker} value={h.ticker}>
-                  {h.ticker.replace(".JK", "")} · avg {fmtPrice(h.avg_cost)}
-                </option>
-              ))}
-            </select>
-            {holdings.length === 0 && (
-              <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 4 }}>
-                ⚠️ Belum punya holdings — beli saham dulu
+            {/* Price Input */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Trigger Price (Rp)</label>
+              <input
+                type="number"
+                placeholder={formType === "TP" ? "Target price..." : "Exit price..."}
+                value={formPrice}
+                onChange={e => setFormPrice(e.target.value)}
+                className={`w-full bg-slate-950 border rounded-lg px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none transition-colors ${
+                  formPrice && !priceValid ? "border-rose-500" : "border-slate-800 focus:border-blue-500/50"
+                }`}
+              />
+              {avgCost > 0 && (
+                 <p className={`text-[9px] font-bold uppercase tracking-tight ${formPrice && !priceValid ? "text-rose-500" : "text-slate-600"}`}>
+                   {formType === "TP" ? `Suggested: > ${fmtPrice(avgCost)}` : `Suggested: < ${fmtPrice(avgCost)}`}
+                 </p>
+              )}
+            </div>
+
+            {/* Lots Input */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-baseline">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Quantity</label>
+                <span className="text-[9px] font-bold text-blue-500/80">1 LOT = 100 SHARES</span>
               </div>
-            )}
-          </div>
+              <input
+                type="number"
+                placeholder="Enter lots..."
+                min={1}
+                value={formLots}
+                onChange={e => setFormLots(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-blue-500/50"
+              />
+            </div>
 
-          {/* Info konteks harga */}
-          {formTicker && selectedHolding && (
-            <div style={{
-              background:   "#040d1a",
-              border:       "1px solid #0f2040",
-              borderRadius: 3,
-              padding:      "7px 8px",
-              fontSize:     10,
-              color:        "#4a6080",
-              marginBottom: 8,
-              lineHeight:   1.6,
-            }}>
-              <div>Avg cost: <span style={{ color: "#c8d8f0", fontFamily: "'Space Mono', monospace" }}>{fmtPrice(selectedHolding.avg_cost)}</span></div>
-              {currentQuote && (
-                <div>
-                  Harga sekarang:{" "}
-                  <span style={{
-                    color:      currentQuote.change_pct >= 0 ? "#00d68f" : "#ff4560",
-                    fontFamily: "'Space Mono', monospace",
-                  }}>
-                    {fmtPrice(currentQuote.price)}
-                  </span>
-                  <span style={{ marginLeft: 4 }}>
-                    ({currentQuote.change_pct >= 0 ? "+" : ""}{currentQuote.change_pct.toFixed(2)}%)
-                  </span>
+            {/* Estimate */}
+            {estimatedValue !== null && (
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg border-dashed">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[9px] font-bold text-slate-600 uppercase">Estimated Value</span>
+                  <span className="text-[10px] font-mono font-black text-white">{fmtRp(estimatedValue)}</span>
                 </div>
-              )}
-              <div>Kepemilikan: <span style={{ color: "#c8d8f0" }}>{selectedHolding.lots ?? Math.floor(selectedHolding.shares / 100)} lot</span></div>
-            </div>
-          )}
-
-          {/* Harga Trigger */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, color: "#4a6080", marginBottom: 4, fontFamily: "'Syne', sans-serif" }}>
-              HARGA TRIGGER (RP)
-            </div>
-            <input
-              type="number"
-              placeholder={
-                formType === "TP"
-                  ? avgCost ? `Di atas ${fmtPrice(avgCost)}` : "Harga jual target"
-                  : avgCost ? `Di bawah ${fmtPrice(avgCost)}` : "Harga cut-loss"
-              }
-              value={formPrice}
-              onChange={e => setFormPrice(e.target.value)}
-              style={{
-                ...INPUT,
-                borderColor: formPrice && !priceValid ? "#ff4560" : "#0f2040",
-              }}
-            />
-
-            {/* Price hint dengan warna sesuai validitas */}
-            {priceHint && (
-              <div style={{
-                fontSize:  10,
-                color:     formPrice && !priceValid ? "#ff4560" : "#4a6080",
-                marginTop: -4,
-                marginBottom: 6,
-              }}>
-                {formPrice && !priceValid ? "⚠️ " : "💡 "}{priceHint}
+                <p className="text-[8px] font-bold text-slate-700 uppercase tracking-tighter text-right">
+                  {formLots} lots × 100 × {fmtPrice(parseFloat(formPrice))}
+                </p>
               </div>
             )}
+
+            <button
+              onClick={handleAddOrder}
+              disabled={submitting || !formTicker || !formPrice || !formLots || !priceValid}
+              className={`w-full py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                formType === "TP" 
+                  ? "bg-emerald-500 text-slate-950 hover:bg-emerald-400" 
+                  : "bg-rose-500 text-slate-950 hover:bg-rose-400"
+              } disabled:opacity-30 disabled:pointer-events-none shadow-lg`}
+            >
+              {submitting ? "Processing..." : `Set ${formType === "TP" ? "Profit Target" : "Stop Loss"}`}
+            </button>
           </div>
 
-          {/* Jumlah Lot */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ fontSize: 10, color: "#4a6080", fontFamily: "'Syne', sans-serif" }}>JUMLAH LOT</span>
-              {/* Tooltip penjelasan lot */}
-              <span style={{ fontSize: 10, color: "#2e8fdf" }}>1 lot = 100 lembar</span>
-            </div>
-            <input
-              type="number"
-              placeholder="Jumlah lot (mis. 5)"
-              min={1}
-              value={formLots}
-              onChange={e => setFormLots(e.target.value)}
-              style={INPUT}
-            />
-          </div>
-
-          {/* Estimasi nilai */}
-          {estimatedValue !== null && (
-            <div style={{
-              background:   "#040d1a",
-              border:       "1px solid #0f2040",
-              borderRadius: 3,
-              padding:      "6px 8px",
-              fontSize:     10,
-              color:        "#4a6080",
-              marginBottom: 10,
-            }}>
-              Estimasi nilai:{" "}
-              <span style={{ color: "#c8d8f0", fontFamily: "'Space Mono', monospace" }}>
-                {fmtRp(estimatedValue)}
-              </span>
-              <span style={{ color: "#2a4060", marginLeft: 4 }}>
-                ({formLots} lot × 100 × {fmtPrice(parseFloat(formPrice))})
-              </span>
-            </div>
-          )}
-
-          <button
-            onClick={handleAddOrder}
-            disabled={submitting || !formTicker || !formPrice || !formLots || !priceValid}
-            style={{
-              width:      "100%",
-              padding:    "9px 0",
-              fontSize:   11,
-              fontFamily: "'Syne', sans-serif",
-              fontWeight: 700,
-              border:     "none",
-              borderRadius: 3,
-              cursor:     (submitting || !formTicker || !formPrice || !formLots || !priceValid)
-                ? "not-allowed" : "pointer",
-              background: formType === "TP" ? "#00d68f" : "#ff4560",
-              color:      "#050a14",
-              opacity:    (submitting || !formTicker || !formPrice || !formLots || !priceValid) ? 0.5 : 1,
-            }}
-          >
-            {submitting ? "Memproses..." : `Pasang ${formType}`}
-          </button>
-
-          {/* Feedback message — error persist, success auto-clear */}
+          {/* Feedback */}
           {formMsg && (
-            <div style={{
-              marginTop:  8,
-              padding:    "7px 10px",
-              borderRadius: 3,
-              fontSize:   11,
-              background: formMsg.ok ? "#00d68f11" : "#ff456011",
-              color:      formMsg.ok ? "#00d68f" : "#ff4560",
-              border:     `1px solid ${formMsg.ok ? "#00d68f33" : "#ff456033"}`,
-              display:    "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap:        6,
-            }}>
-              <span style={{ flex: 1 }}>{formMsg.message}</span>
-              {/* Error harus dismiss manual */}
-              {!formMsg.ok && (
-                <button
-                  onClick={() => setFormMsg(null)}
-                  style={{
-                    background: "transparent", border: "none",
-                    color: "#ff4560", cursor: "pointer",
-                    fontSize: 12, padding: "0 2px", flexShrink: 0,
-                  }}
-                >✕</button>
-              )}
+            <div className={`p-4 rounded-xl text-[10px] font-bold flex justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 ${
+              formMsg.ok ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+            }`}>
+              <span className="uppercase tracking-tight flex-1">{formMsg.message}</span>
+              {!formMsg.ok && <button onClick={() => setFormMsg(null)} className="shrink-0 hover:text-white">✕</button>}
             </div>
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }

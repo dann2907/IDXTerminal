@@ -52,9 +52,11 @@ const Topbar = memo(function Topbar({ indexData, wsStatus, currentTime, activePa
       </nav>
 
       {/* Search Bar Fluid */}
-      <div className="flex-1 max-w-md relative group">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors z-10" />
-        <SearchBar onSelect={onSearchSelect} />
+      <div className="flex-1 flex justify-center">
+        <div className="w-full max-w-md relative group">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors z-10" />
+          <SearchBar onSelect={onSearchSelect} />
+        </div>
       </div>
 
       {/* Meta Stats */}

@@ -68,26 +68,45 @@ const SidebarWatchlist = memo(function SidebarWatchlist({ watchlist, selectedTic
                 {cat.name}
               </button>
             ))}
-            <button onClick={watchlist.createNew} className="px-2 py-1 text-[10px] font-bold rounded bg-slate-800/50 text-slate-500 hover:text-slate-300">
+          </div>
+          <div className="flex gap-1">
+            <input
+              className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[10px] font-medium placeholder:text-slate-600 focus:outline-none"
+              placeholder="New category..."
+              value={watchlist.newName}
+              onChange={(e) => watchlist.setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && watchlist.createNew()}
+            />
+            <button 
+              onClick={watchlist.createNew}
+              className="px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+            >
               <Plus size={12} />
             </button>
           </div>
         </div>
 
         {/* Add Ticker Input */}
-        <div className="relative">
+        <div className="flex gap-1">
           <input
-            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+            className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 transition-colors"
             placeholder={watchlist.active ? "Add symbol (e.g. ASII)" : "Create category first"}
             value={watchlist.tickerInput}
             onChange={(e) => watchlist.setTickerInput(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === "Enter" && watchlist.manualAdd()}
             disabled={!watchlist.active}
           />
+          <button
+            onClick={watchlist.manualAdd}
+            disabled={!watchlist.active}
+            className="px-3 bg-blue-600 text-white rounded-lg disabled:opacity-30 flex items-center justify-center"
+          >
+            <Plus size={14} />
+          </button>
         </div>
 
         {/* Watchlist Items */}
-        <div className="flex-1 space-y-1 overflow-y-auto -mx-2 px-2">
+        <div className="flex-1 space-y-1 overflow-y-auto -mx-2 px-2 relative">
           {watchlist.activeTickers.map((ticker) => {
             const q = quotes[ticker];
             const fl = flashMap[ticker];
@@ -98,7 +117,7 @@ const SidebarWatchlist = memo(function SidebarWatchlist({ watchlist, selectedTic
               <div
                 key={ticker}
                 onClick={() => onSelectTicker(ticker)}
-                className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
+                className={`group relative flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
                   isSelected ? "bg-slate-800 shadow-lg ring-1 ring-slate-700" : "hover:bg-slate-800/50"
                 } ${fl === "up" ? "bg-emerald-500/10" : fl === "dn" ? "bg-rose-500/10" : ""}`}
               >
@@ -109,7 +128,7 @@ const SidebarWatchlist = memo(function SidebarWatchlist({ watchlist, selectedTic
                   </div>
                 </div>
 
-                <div className="flex flex-col items-end">
+                <div className="flex flex-col items-end mr-4">
                   <span className="text-xs font-mono font-bold">{q ? fmtPrice(q.price) : "—"}</span>
                   <span className={`text-[10px] font-black ${q && q.change_pct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                     {q ? (q.change_pct >= 0 ? "+" : "") + fmtPct(q.change_pct) : ""}
@@ -118,7 +137,7 @@ const SidebarWatchlist = memo(function SidebarWatchlist({ watchlist, selectedTic
 
                 <button 
                   onClick={(e) => { e.stopPropagation(); watchlist.removeTicker(ticker); }}
-                  className="hidden group-hover:flex absolute -left-1 bg-rose-500 text-white rounded-full p-0.5 scale-75 shadow-lg"
+                  className="opacity-0 group-hover:opacity-100 absolute right-2 top-1/2 -translate-y-1/2 bg-slate-900/80 hover:bg-rose-500 text-slate-400 hover:text-white rounded-md p-1 transition-all"
                 >
                   <X size={12} />
                 </button>

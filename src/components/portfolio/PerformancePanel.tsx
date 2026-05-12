@@ -1,28 +1,16 @@
-// src/components/portfolio/PerformancePanel.tsx
-//
-// Panel performa portfolio:
-//   - Period selector: Hari Ini | Minggu Ini | Bulan Ini | Semua
-//   - Metrics cards: Realized P&L, Win Rate, Best Trade, Worst Trade
-//   - Per-ticker breakdown table
-//   - Equity curve dari trade history (SVG, no extra deps)
-//
-// Future Improvement(tandain "Done" kalau sudah diimplementasikan):
-//   - upgrade equity curve
-//   - detailed gain/loss perday,week,month,year (include pnl/floating pnl hari ke hari)
-
-import { useState, useEffect, useMemo } from "react";
-import { usePortfolioStore, type TradeRecord } from "../../stores/usePortfolioStore";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
+import { useState, useEffect, useMemo, useRef } from "react";
+import { usePortfolioStore } from "../../stores/usePortfolioStore";
+import { fmtRp, fmtPct } from "../../features/dashboard/helpers/formatters";
+import { TrendingUp, Target, Award, AlertCircle, BarChart3, Calendar, HelpCircle, Briefcase, ChevronRight } from "lucide-react";
 
 interface PerfData {
   period: string
   by_ticker: Record<string, TickerStat>
-
+  pnl_series: { date: string, pnl: number }[]
   floating_pnl: number
   total_realized: number
-
   win_rate: number
+  win_count: number
   total_trades: number
   best_trade: number
   worst_trade: number
@@ -38,93 +26,127 @@ interface TickerStat {
   pnl_pct: number
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const fmtRp = (v: number) => {
-  const sign = v < 0 ? "-" : "+";
-  const abs  = Math.abs(v);
-  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(1)}M`;
-  if (abs >= 1_000_000)     return `${sign}${(abs / 1_000_000).toFixed(2)}Jt`;
-  return `${sign}Rp${abs.toLocaleString("id")}`;
-};
-
 const PERIODS = [
-  { key: "day",   label: "Hari Ini" },
-  { key: "week",  label: "Minggu" },
-  { key: "month", label: "Bulan" },
-  { key: "all",   label: "Semua" },
+  { key: "day",   label: "Day" },
+  { key: "week",  label: "Week" },
+  { key: "month", label: "Month" },
+  { key: "all",   label: "All Time" },
 ] as const;
 
-// ── Equity Curve SVG ──────────────────────────────────────────────────────────
+function EquityCurve({ series }: { series: { date: string, pnl: number }[] }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-function EquityCurve({ history }: { history: TradeRecord[] }) {
-  // Hitung running equity dari sell transactions saja
-  const points = useMemo(() => {
-    let equity = 0;
-    return history
-      .filter(t => t.action === "SELL")
-      .slice(-50) // max 50 titik
-      .map(t => {
-        equity += t.total;
-        return equity;
-      });
-  }, [history]);
-
-  if (points.length < 2) {
+  if (series.length < 2) {
     return (
-      <div style={{ height: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "#2a4060", fontSize: 10 }}>
-        Belum ada transaksi SELL untuk grafik
+      <div className="h-40 flex flex-col items-center justify-center gap-2 border border-dashed border-slate-800 rounded-xl bg-slate-900/10">
+        <BarChart3 size={24} className="text-slate-700" />
+        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-10 text-center">Not enough data to generate P&L curve for this period</p>
       </div>
     );
   }
 
-  const W = 600, H = 80;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
+  const W = 1000, H = 160;
+  const values = series.map(p => p.pnl);
+  const min = Math.min(0, ...values); // include 0 baseline
+  const max = Math.max(0.1, ...values);
   const range = max - min || 1;
 
-  const pts = points.map((v, i) => {
-    const x = (i / (points.length - 1)) * W;
-    const y = H - ((v - min) / range) * (H - 8) - 4;
-    return `${x},${y}`;
-  }).join(" ");
+  const pts = series.map((p, i) => {
+    const x = (i / (series.length - 1)) * W;
+    const y = H - ((p.pnl - min) / range) * (H - 40) - 20;
+    return { x, y, val: p.pnl, date: p.date };
+  });
 
-  const isUp  = points[points.length - 1] >= points[0];
-  const color = isUp ? "#00d68f" : "#ff4560";
+  const polylineStr = pts.map(p => `${p.x},${p.y}`).join(" ");
+  const lastPoint = pts[pts.length - 1];
+  const isUp = lastPoint.val >= pts[0].val;
+  const color = isUp ? "#10b981" : "#f43f5e";
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const mouseX = ((e.clientX - rect.left) / rect.width) * W;
+    
+    let closestDist = Infinity;
+    let closestIdx = 0;
+    pts.forEach((p, i) => {
+      const dist = Math.abs(p.x - mouseX);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = i;
+      }
+    });
+    setHoverIndex(closestIdx);
+  };
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 80 }}>
-      {/* Grid lines */}
-      {[0.25, 0.5, 0.75].map(f => (
-        <line key={f} x1={0} y1={H * f} x2={W} y2={H * f}
-          stroke="#0f2040" strokeWidth={1} />
-      ))}
-      {/* Zero line */}
-      <line x1={0} y1={H} x2={W} y2={H} stroke="#0f2040" strokeWidth={1} />
-      {/* Area fill */}
-      <polyline
-        points={`0,${H} ${pts} ${W},${H}`}
-        fill={`${color}18`}
-        stroke="none"
-      />
-      {/* Line */}
-      <polyline
-        points={pts}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <div 
+      ref={containerRef}
+      className="relative cursor-crosshair"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setHoverIndex(null)}
+    >
+      {/* Tooltip Overlay */}
+      {hoverIndex !== null && pts[hoverIndex] && (
+        <div 
+          className="absolute z-20 pointer-events-none bg-slate-950 border border-slate-700 rounded-lg p-3 shadow-2xl animate-in fade-in zoom-in-95 duration-150 ring-1 ring-slate-800"
+          style={{ 
+            left: `${(pts[hoverIndex].x / W) * 100}%`, 
+            top: `${(pts[hoverIndex].y / H) * 100}%`,
+            transform: `translate(${pts[hoverIndex].x > W/2 ? '-110%' : '10%'}, -50%)`
+          }}
+        >
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{pts[hoverIndex].date.slice(0, 16).replace("T", " ")}</p>
+          <div className="flex items-center gap-2">
+             <span className="text-[10px] font-bold text-slate-400 uppercase">Cumulative P&L:</span>
+             <span className={`text-sm font-mono font-black ${pts[hoverIndex].val >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {fmtRp(pts[hoverIndex].val)}
+             </span>
+          </div>
+        </div>
+      )}
+
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-40 overflow-visible">
+        <defs>
+          <linearGradient id="curveGradientPerfFixed" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {/* Baseline (Zero) */}
+        <line x1="0" y1={H - ((0 - min) / range) * (H - 40) - 20} x2={W} y2={H - ((0 - min) / range) * (H - 40) - 20} className="stroke-slate-800" strokeWidth="1" strokeDasharray="4,2" />
+        
+        {/* Fill Area */}
+        <polyline points={`0,${H} ${polylineStr} ${W},${H}`} fill="url(#curveGradientPerfFixed)" />
+        
+        {/* Line Path */}
+        <polyline 
+          points={polylineStr} 
+          fill="none" 
+          stroke={color} 
+          strokeWidth="3" 
+          strokeLinecap="round" 
+          strokeLinejoin="round" 
+          className="drop-shadow-lg"
+        />
+
+        {/* Hover Point */}
+        {hoverIndex !== null && pts[hoverIndex] && (
+          <>
+            <line x1={pts[hoverIndex].x} y1="0" x2={pts[hoverIndex].x} y2={H} className="stroke-slate-700/50" strokeWidth="1" />
+            <circle cx={pts[hoverIndex].x} cy={pts[hoverIndex].y} r="5" fill={color} className="animate-pulse" />
+            <circle cx={pts[hoverIndex].x} cy={pts[hoverIndex].y} r="2" fill="#fff" />
+          </>
+        )}
+      </svg>
+    </div>
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
-
 export default function PerformancePanel() {
   const performance    = usePortfolioStore(s => s.performance) as PerfData | null;
-  const history        = usePortfolioStore(s => s.history);
+  const holdings       = usePortfolioStore(s => s.holdings);
   const fetchPerformance = usePortfolioStore(s => s.fetchPerformance);
   const fetchHistory   = usePortfolioStore(s => s.fetchHistory);
 
@@ -135,152 +157,169 @@ export default function PerformancePanel() {
     fetchHistory();
   }, [period, fetchPerformance, fetchHistory]);
 
-  const perf = performance as PerfData | null;
+  const perf = performance;
 
-  const MetricCard = ({ label, value, color = "#c8d8f0", sub = "" }: {
-    label: string; value: string; color?: string; sub?: string;
-  }) => (
-    <div style={{
-      background:   "#070d1c",
-      border:       "1px solid #0f2040",
-      borderRadius: 6,
-      padding:      "10px 14px",
-    }}>
-      <div style={{ fontSize: 8, letterSpacing: 1, color: "#4a6080", fontFamily: "'Syne', sans-serif", marginBottom: 4 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 15, fontWeight: 700, color, fontFamily: "'Space Mono', monospace" }}>
-        {value}
-      </div>
-      {sub && <div style={{ fontSize: 9, color: "#4a6080", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
+  const topMetrics = useMemo(() => [
+    { label: "Realized P&L", val: perf ? fmtRp(perf.total_realized) : "—", color: perf ? (perf.total_realized >= 0 ? "text-emerald-400" : "text-rose-400") : "text-white", icon: Award, desc: "Profit/loss from closed positions in this period" },
+    { label: "Win Rate", val: perf ? `${perf.win_rate.toFixed(1)}%` : "—", color: perf && perf.win_rate >= 50 ? "text-emerald-400" : "text-rose-400", sub: perf ? `${perf.win_count} WINS OUT OF ${perf.total_trades} TRADES` : "", icon: Target, desc: "Percentage of profitable sell trades" },
+  ], [perf]);
+
+  const subMetrics = useMemo(() => [
+    { label: "Best Trade", val: perf && perf.best_trade !== undefined ? fmtRp(perf.best_trade) : "—", color: "text-emerald-400", icon: TrendingUp },
+    { label: "Worst Trade", val: perf && perf.worst_trade !== undefined ? fmtRp(perf.worst_trade) : "—", color: "text-rose-400", icon: AlertCircle },
+  ], [perf]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, overflow: "auto", height: "100%" }}>
-
-      {/* ── Period selector ── */}
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-        <span style={{ fontSize: 8, color: "#4a6080", letterSpacing: 2, fontFamily: "'Syne', sans-serif" }}>PERIODE</span>
-        {PERIODS.map(p => (
-          <button key={p.key} onClick={() => setPeriod(p.key)} style={{
-            padding:    "4px 14px",
-            fontSize:   9,
-            fontFamily: "'Syne', sans-serif",
-            fontWeight: 700,
-            border:     "1px solid #0f2040",
-            borderRadius: 3,
-            cursor:     "pointer",
-            background: period === p.key ? "#2e8fdf22" : "transparent",
-            color:      period === p.key ? "#2e8fdf" : "#4a6080",
-          }}>
-            {p.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Metric cards ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, flexShrink: 0 }}>
-        <MetricCard
-          label="REALIZED P&L"
-          value={perf ? fmtRp(perf.total_realized) : "—"}
-          color={perf ? (perf.total_realized >= 0 ? "#00d68f" : "#ff4560") : "#c8d8f0"}
-        />
-        <MetricCard
-            label="WIN RATE"
-            value={perf ? `${perf.win_rate.toFixed(1)}%` : "—"}
-            color={perf && perf.win_rate >= 50 ? "#00d68f" : "#ff4560"}
-            sub={perf ? `${perf.total_trades} trades` : ""}
-        />
-        <MetricCard
-          label="BEST TRADE"
-          value={perf && perf.best_trade !== undefined ? fmtRp(perf.best_trade) : "—"}
-          color="#00d68f"
-        />
-        <MetricCard
-          label="WORST TRADE"
-          value={perf && perf.worst_trade !== undefined ? fmtRp(perf.worst_trade) : "—"}
-          color="#ff4560"
-        />
-      </div>
-
-      {/* ── Equity curve ── */}
-      <div style={{
-        background:   "#070d1c",
-        border:       "1px solid #0f2040",
-        borderRadius: 6,
-        padding:      "10px 12px",
-        flexShrink:   0,
-      }}>
-        <div style={{ fontSize: 8, letterSpacing: 2, color: "#4a6080", fontFamily: "'Syne', sans-serif", marginBottom: 8 }}>
-          EQUITY CURVE — KUMULATIF HASIL SELL
+    <div className="flex flex-col space-y-6 pb-12">
+      
+      {/* Time Period Selector - High Fidelity */}
+      <div className="flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <Calendar size={14} className="text-slate-500" />
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Analysis Period</span>
         </div>
-        <EquityCurve history={history} />
+        <div className="flex items-center gap-1 p-1 bg-slate-900/50 border border-slate-800 rounded-xl shadow-sm">
+          {PERIODS.map(p => (
+            <button 
+              key={p.key} 
+              onClick={() => setPeriod(p.key as any)} 
+              className={`px-5 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                period === p.key 
+                  ? "bg-blue-600 text-white shadow-lg ring-1 ring-blue-500/50" 
+                  : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* ── Per-ticker table ── */}
-      {perf && perf.by_ticker && Object.keys(perf.by_ticker).length > 0 && (
-        <div style={{
-          background:   "#070d1c",
-          border:       "1px solid #0f2040",
-          borderRadius: 6,
-          overflow:     "auto",
-        }}>
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid #0f2040" }}>
-            <span style={{ fontSize: 8, letterSpacing: 2, color: "#4a6080", fontFamily: "'Syne', sans-serif" }}>
-              PERFORMA PER SAHAM
-            </span>
+      {/* KPI Cards - Balanced Hierarchy & Standardized Height */}
+      <div className="grid grid-cols-12 gap-4 shrink-0">
+        {topMetrics.map(m => (
+          <div key={m.label} className="col-span-4 bg-slate-900/50 border border-slate-800 rounded-2xl p-6 shadow-xl group hover:border-slate-700 transition-all min-h-[120px] flex flex-col justify-center">
+             <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 brightness-125">{m.label}</span>
+                <HelpCircle size={10} className="text-slate-600 cursor-help" />
+              </div>
+              <m.icon size={16} className="text-slate-500 group-hover:text-blue-400 transition-colors" />
+            </div>
+            <div className={`text-2xl font-mono font-black tracking-tight ${m.color}`}>
+              {m.val}
+            </div>
+            {m.sub ? (
+              <p className="text-[9px] font-black text-slate-500 mt-2 uppercase tracking-widest">{m.sub}</p>
+            ) : (
+              <div className="h-4 mt-2" /> // spacer to match height
+            )}
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+        ))}
+        <div className="col-span-4 flex flex-col gap-3">
+           {subMetrics.map(m => (
+             <div key={m.label} className="flex-1 bg-slate-900/30 border border-slate-800 rounded-xl px-5 py-3 shadow-sm flex items-center justify-between hover:border-slate-700 transition-all group">
+               <div>
+                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-0.5">{m.label}</p>
+                 <p className={`text-sm font-mono font-black ${m.color}`}>{m.val}</p>
+               </div>
+               <m.icon size={18} className="text-slate-800 group-hover:text-slate-600 transition-colors" />
+             </div>
+           ))}
+        </div>
+      </div>
+
+      {/* Equity Curve Section - Accurate Cumulative Realized */}
+      <div className="bg-slate-900/30 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-blue-500/10 rounded-lg">
+              <TrendingUp size={18} className="text-blue-400" />
+            </div>
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-white">Periodic Profit Growth</h3>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight mt-0.5">Time-series of cumulative realized returns (closed trades)</p>
+            </div>
+          </div>
+          <div className="px-3 py-1.5 bg-slate-950/50 rounded-lg border border-slate-800">
+             <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Volatility: </span>
+             <span className="text-[10px] font-mono font-bold text-emerald-500/80">LIMITED</span>
+          </div>
+        </div>
+        <EquityCurve series={perf?.pnl_series || []} />
+      </div>
+
+      {/* Per-ticker Breakdown Table - No Cut-off (Parent Scroll) */}
+      {perf && perf.by_ticker && Object.keys(perf.by_ticker).length > 0 && (
+        <div className="bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/20">
+             <div className="flex items-center gap-2">
+               <Briefcase size={16} className="text-slate-400" />
+               <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-300">Performance by Asset</h3>
+             </div>
+             <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">{Object.keys(perf.by_ticker).length} Assets tracked</span>
+          </div>
+          <table className="w-full border-collapse">
             <thead>
-              <tr style={{ color: "#2a4060" }}>
-                {["Ticker", "Realized P&L", "Trades", "Win Rate"].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "5px 12px", fontWeight: 400, fontSize: 8, letterSpacing: 1, fontFamily: "'Syne', sans-serif" }}>{h}</th>
-                ))}
+              <tr className="bg-slate-950/50">
+                <th className="text-left px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">Asset</th>
+                <th className="text-right px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">Realized P&L</th>
+                <th className="text-right px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">Current Value</th>
+                <th className="text-center px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">Trades</th>
+                <th className="text-right px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">Return %</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-800/50">
               {Object.entries(perf.by_ticker)
-                    .sort(([, a], [, b]) => b.pnl_rp - a.pnl_rp)
-                    .map(([ticker, stat]) => (
-                  <tr key={ticker} style={{ borderTop: "1px solid #0a1830" }}>
-                    <td style={{ padding: "6px 12px", color: "#8aa8cc", fontWeight: 700 }}>
-                      {ticker.replace(".JK", "")}
-                    </td>
-                    <td style={{
-                        padding: "6px 12px",
-                        color: stat.pnl_rp >= 0 ? "#00d68f" : "#ff4560",
-                        fontFamily: "'Space Mono', monospace",
-                    }}>
+                .sort(([, a], [, b]) => b.pnl_rp - a.pnl_rp)
+                .map(([ticker, stat]) => {
+                  const holding = holdings.find(h => h.ticker === ticker);
+                  return (
+                    <tr key={ticker} className="h-[56px] hover:bg-slate-800/40 transition-all group cursor-pointer">
+                      <td className="px-6 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-sm text-blue-400 group-hover:text-blue-300 uppercase tracking-tight transition-colors">
+                            {ticker.replace(".JK", "")}
+                          </span>
+                          <ChevronRight size={14} className="text-slate-700 opacity-0 group-hover:opacity-100 transition-all -translate-x-2 group-hover:translate-x-0" />
+                        </div>
+                      </td>
+                      <td className={`px-6 py-2 font-mono text-xs font-black text-right ${stat.pnl_rp >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                         {fmtRp(stat.pnl_rp)}
-                    </td>
-                    <td style={{ padding: "6px 12px", color: "#c8d8f0" }}>
-                      {stat.trades}
-                    </td>
-                    <td style={{ padding: "6px 12px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{
-                          height:       6,
-                          width:        `${Math.max(4, Math.abs(stat.pnl_pct))}%`,
-                          maxWidth:     80,
-                          background:   stat.pnl_pct >= 50 ? "#00d68f" : "#ff4560",
-                          borderRadius: 3,
-                        }} />
-                        <span style={{ color: stat.pnl_pct >= 50 ? "#00d68f" : "#ff4560", fontSize: 9 }}>
-                          {stat.pnl_pct.toFixed(2)}%
+                      </td>
+                      <td className="px-6 py-2 text-right">
+                        <span className="font-mono text-xs font-bold text-slate-300">
+                          {holding ? fmtRp(holding.market_value) : "—"}
                         </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-6 py-2 text-center text-xs font-bold text-slate-500 font-mono">
+                        {stat.trades}
+                      </td>
+                      <td className="px-6 py-2">
+                        <div className="flex items-center justify-end gap-3">
+                          <div className="w-20 h-1.5 bg-slate-800/50 rounded-full overflow-hidden shrink-0 border border-slate-800">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-700 ease-out ${stat.pnl_pct >= 0 ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]" : "bg-rose-500"}`}
+                              style={{ width: `${Math.min(100, Math.max(5, Math.abs(stat.pnl_pct)))}%` }}
+                            />
+                          </div>
+                          <span className={`text-[11px] font-black font-mono w-14 text-right ${stat.pnl_pct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                            {fmtPct(stat.pnl_pct)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
       )}
 
       {!perf && (
-        <div style={{ textAlign: "center", color: "#2a4060", fontSize: 11, padding: 20 }}>
-          Memuat data performa...
+        <div className="flex flex-col items-center justify-center py-32 animate-pulse">
+           <BarChart3 size={64} className="text-slate-800 mb-6" />
+           <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Aggregating Intelligence...</p>
         </div>
       )}
     </div>
