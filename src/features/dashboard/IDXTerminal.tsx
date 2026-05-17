@@ -19,7 +19,7 @@ import PortfolioPage from "./PortfolioPage";
 import HeatmapPage from "./HeatmapPage";
 
 // Features from other folders
-import Screener from "../../components/market/Screener";
+import Screener from "../../components/market/screener/Screener";
 import AlertsPanel from "../../components/alerts/AlertsPanel";
 import TradeConfirmDialog from "../../components/TradeConfirmDialog";
 

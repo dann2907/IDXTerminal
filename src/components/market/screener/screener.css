@@ -1,0 +1,25 @@
+.screener-row:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+.screener-row:hover .ticker-sym {
+  color: #00A8FF !important;
+}
+.screener-row.active {
+  background: rgba(0, 168, 255, 0.15) !important;
+  border-left: 3px solid #00A8FF !important;
+}
+.screener-row.active .ticker-sym {
+  font-weight: 700 !important;
+  color: #FFFFFF !important;
+}
+.screener-row .watchlist-btn {
+  visibility: hidden;
+}
+.screener-row:hover .watchlist-btn,
+.screener-row.active .watchlist-btn {
+  visibility: visible;
+}
+.watchlist-btn:hover {
+  border-color: #00A8FF !important;
+  color: #00A8FF !important;
+}
