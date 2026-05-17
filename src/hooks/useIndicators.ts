@@ -7,11 +7,11 @@
 // sedang ditampilkan tanpa re-render komponen lain.
 
 import { useMemo } from "react";
-import { useMarketStore } from "../stores/useMarketStore";
+import { useMarketStore } from "@/stores/market";
 import {
   sma, ema, bollingerBands, rsi, macd,
   type LinePoint, type BBPoint, type MACDPoint,
-} from "../lib/indicators";
+} from "@/lib/indicators";
 
 export interface IndicatorSet {
   sma20:  LinePoint[];

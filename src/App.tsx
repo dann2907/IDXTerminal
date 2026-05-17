@@ -3,13 +3,13 @@
 // Root component dengan Auth Gate dan Bootstrap.
 
 import { useEffect } from "react";
-import IDXTerminal              from "./features/dashboard/IDXTerminal";
-import OrderTriggeredDialog     from "./components/OrderTriggeredDialog";
-import LoginPage                from "./components/auth/LoginPage";
-import ResetPasswordPage         from "./components/auth/ResetPasswordPage";
-import { useMarketStore }       from "./stores/useMarketStore";
-import { usePortfolioStore }    from "./stores/usePortfolioStore";
-import { useAuthStore }         from "./stores/useAuthStore";
+import IDXTerminal              from "@/features/dashboard/IDXTerminal";
+import OrderTriggeredDialog     from "@/shared/ui/OrderTriggeredDialog";
+import LoginPage                from "@/features/auth/LoginPage";
+import ResetPasswordPage         from "@/features/auth/ResetPasswordPage";
+import { useMarketStore }       from "@/stores/market";
+import { usePortfolioStore }    from "@/stores/portfolio";
+import { useAuthStore }         from "@/stores/auth";
 
 export default function App() {
   const { token, user, initialized, loadMe } = useAuthStore();

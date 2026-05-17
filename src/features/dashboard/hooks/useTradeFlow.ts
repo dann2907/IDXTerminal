@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePortfolioStore } from "../../../stores/usePortfolioStore";
+import { usePortfolioStore } from "@/stores/portfolio";
 import { QuoteData, Holding, PortfolioSummary } from "../../../types";
 
 interface TradeMessage {

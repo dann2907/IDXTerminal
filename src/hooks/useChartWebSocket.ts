@@ -19,7 +19,7 @@ import {
   chartKey,
   type Timeframe,
   type CandleBar,
-} from "../stores/useChartStore";
+} from "@/stores/chart";
 
 const API_BASE = "http://127.0.0.1:8765";
 const WS_URL   = "ws://127.0.0.1:8765/ws/prices";

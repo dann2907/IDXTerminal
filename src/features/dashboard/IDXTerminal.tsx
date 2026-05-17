@@ -1,27 +1,25 @@
 // src/components/IDXTerminal/IDXTerminal.jsx
 import { useState, useCallback, useMemo, memo } from "react";
-import { useMarketStore } from "../../stores/useMarketStore";
-import { usePortfolioStore } from "../../stores/usePortfolioStore";
+import { useMarketStore } from "@/stores/market";
+import { usePortfolioStore } from "@/stores/portfolio";
 import { useClock } from "./hooks/useClock";
 import { useFlashQuotes } from "./hooks/useFlashQuotes";
 import { useWatchlistManager } from "./hooks/useWatchlistManager";
 import { useTradeFlow } from "./hooks/useTradeFlow";
 
-import Topbar from "./Topbar";
-import SidebarWatchlist from "./SidebarWatchlist";
-import RightPanel from "./RightPanel";
-import FeedBar from "./FeedBar";
+import Topbar from "./layout/Topbar";
+import SidebarWatchlist from "./layout/SidebarWatchlist";
+import RightPanel from "./layout/RightPanel";
+import FeedBar from "./layout/FeedBar";
 
-// Lazy-loaded sub-pages
-import ChartPage from "./ChartPage";
-import MarketPage from "./MarketPage";
-import PortfolioPage from "./PortfolioPage";
-import HeatmapPage from "./HeatmapPage";
-
-// Features from other folders
-import Screener from "../../components/market/screener/Screener";
-import AlertsPanel from "../../components/alerts/AlertsPanel";
-import TradeConfirmDialog from "../../components/TradeConfirmDialog";
+// Features and pages
+import ChartPage from "@/features/chart/ChartPage";
+import MarketPage from "@/features/screener/MarketPage";
+import PortfolioPage from "@/features/portfolio/PortfolioPage";
+import HeatmapPage from "@/features/screener/HeatmapPage";
+import Screener from "@/features/screener/Screener";
+import AlertsPanel from "@/features/alerts/AlertsPanel";
+import TradeConfirmDialog from "@/shared/ui/TradeConfirmDialog";
 
 const IDXTerminal = memo(function IDXTerminal() {
   const [page, setPage] = useState("MARKET");

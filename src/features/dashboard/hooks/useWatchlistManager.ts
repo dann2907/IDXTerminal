@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { usePortfolioStore } from "../../../stores/usePortfolioStore";
+import { usePortfolioStore } from "@/stores/portfolio";
 
 export function useWatchlistManager() {
   const watchlistCategories   = usePortfolioStore(s => s.watchlistCategories);
