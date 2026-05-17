@@ -66,8 +66,8 @@ const fmtPct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 
 function parseNum(s: string): number | null {
   if (!s) return null;
-  const n = parseFloat(s.replace(",", "."));
-  return isNaN(n) ? null : n;
+  const n = Number.parseFloat(s.replace(",", "."));
+  return Number.isNaN(n) ? null : n;
 }
 
 // ── Sub-components (Extracted for performance) ─────────────────────────────
@@ -243,7 +243,7 @@ const ScreenerRow = memo(function ScreenerRow({
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function Screener({ onSelectTicker, activeWatchlistCategoryId }: Props) {
+export default function Screener({ onSelectTicker, activeWatchlistCategoryId }: Readonly<Props>) {
   const quotes = useMarketStore(s => s.quotes);
   const indexData = useMarketStore(s => s.indexData);
   const addToWatchlist = usePortfolioStore(s => s.addToWatchlist);
@@ -284,7 +284,7 @@ export default function Screener({ onSelectTicker, activeWatchlistCategoryId }: 
 
     // Combined loop for efficiency
     const withMetrics = allQuotes.map(q => {
-      const rvol = q.avg_volume && q.avg_volume > 0 ? q.volume / q.avg_volume : 1.0;
+      const rvol = q.avg_volume && q.avg_volume > 0 ? q.volume / q.avg_volume : 1;
       const rs_score = q.change_pct - ihsgPct;
       return { ...q, rvol, rs_score };
     });
@@ -374,7 +374,7 @@ export default function Screener({ onSelectTicker, activeWatchlistCategoryId }: 
 
   const getSignals = useCallback((q: typeof processed[0]) => {
     if (q.change_pct < -5) return { label: "OVERSOLD", color: C.dn };
-    if (q.rvol > 2.0) return { label: "UNUSUAL VOL", color: C.accent };
+    if (q.rvol > 2) return { label: "UNUSUAL VOL", color: C.accent };
     if (q.change_pct > 3 && q.volume > 5_000_000) return { label: "BREAKOUT", color: C.accent };
     if (q.rs_rank > 85) return { label: "STRONG RS", color: C.accent };
     if (q.fifty_two_week_high && q.price >= q.fifty_two_week_high * 0.98) return { label: "NEAR ATH", color: C.accent };
@@ -386,7 +386,7 @@ export default function Screener({ onSelectTicker, activeWatchlistCategoryId }: 
     Object.values(quotes).forEach(q => {
       if (q.sector) s.add(q.sector);
     });
-    return ["All", ...Array.from(s).sort()];
+    return ["All", ...Array.from(s).sort((a, b) => a.localeCompare(b))];
   }, [quotes]);
 
   const visibleCols = useMemo(() => {
